@@ -1,67 +1,46 @@
-# ============================================================================
-# Fish Feeding Intensity 单模态（图像）分类配置
-# ============================================================================
+# fish_feeding_image.yaml
 
-# ----------------------------------------------------------------------------
-# 数据配置
-# ----------------------------------------------------------------------------
 data:
   batch_size: 32
   num_workers: 4
   pin_memory: true
-
+  
   train_path: "data/fish_feeding/train"
   val_path: "data/fish_feeding/val"
   test_path: "data/fish_feeding/test"
-
-  # 仅使用 image 模态
+  
   modalities:
     - image
-
-  # 加载器配置
+  
   loaders:
     image:
       type: image_loader
       extra_params: {}
-
+  
   image_size: 224
 
-# ----------------------------------------------------------------------------
-# 类别配置
-# ----------------------------------------------------------------------------
 classes:
   num_classes: 3
-  class_names:
-    - None
-    - Strong
-    - Weak
+  class_names: [None, Strong, Weak]
 
-# ----------------------------------------------------------------------------
-# 模型配置（与多模态写法完全一致）
-# ----------------------------------------------------------------------------
 model:
   backbones:
-    image:                    # 即使只有一个模态，也必须写在 backbones 下
+    image:
       type: resnet18
       pretrained: true
       feature_dim: 512
       freeze: false
       extra_params: {}
-
-  # 单模态时可以不写 fusion 相关字段（框架会自动忽略）
-  # fusion_type: attention     # 可选，写也不会报错，但不会生效
-  # fusion_hidden_dim: 512
-
-  # 分类头配置（所有模态共用）
+  
+  fusion_type: attention   # 单模态不会用到，但保留
+  fusion_hidden_dim: 512
+  
   dropout_rate: 0.1
   classifier_hidden_dims: [256]
 
-# ----------------------------------------------------------------------------
-# 训练、评估、系统配置（与多模态完全相同，仅修改 output_dir 和 experiment_name）
-# ----------------------------------------------------------------------------
 train:
   epochs: 100
-  learning_rate: 0.001
+  learning_rate: 0.0003
   weight_decay: 0.0001
   lr_scheduler: cosine
   warmup_epochs: 5
@@ -76,28 +55,20 @@ train:
   val_interval: 5
 
 eval:
-  metrics:
-    - accuracy
-    - precision
-    - recall
-    - f1
+  metrics: [accuracy, precision, recall, f1]
   save_predictions: true
   confusion_matrix: true
 
 system:
   seed: 42
-  gpu_ids:
-    - 0
-    - 1
-    - 2
-    - 3
+  gpu_ids: [0,1,2,3]
   distributed: true
-  fp16: true
+  fp16: false
   log_interval: 20
   save_interval: 10
-  output_dir: output/fish_feeding_image_only_4gpu
+  output_dir: output/fish_feeding_image
   resume: ""
   dist_backend: nccl
   dist_url: env://
   tensorboard_enabled: true
-  experiment_name: "fish_feeding_image_only_4gpu"
+  experiment_name: "fish_feeding_image"

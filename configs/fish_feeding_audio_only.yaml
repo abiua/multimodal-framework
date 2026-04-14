@@ -1,119 +1,77 @@
-# ============================================================================
-# 多模态分类训练框架 - 音频单模态（TCN方案）
-# ============================================================================
+# fish_feeding_audio.yaml
 
-# ---------------------------------------------------------------------------
-# 数据配置
-# ---------------------------------------------------------------------------
 data:
   batch_size: 32
   num_workers: 4
   pin_memory: true
   
-  train_path: "data/fish_feeding_local/train"
-  val_path: "data/fish_feeding_local/val"
-  test_path: "data/fish_feeding_local/test"
+  train_path: "data/fish_feeding/train"
+  val_path: "data/fish_feeding/val"
+  test_path: "data/fish_feeding/test"
   
-  # ✅ 单模态：音频
   modalities:
     - audio
   
   loaders:
     audio:
-      type: audio_loader_raw
+      type: audio_loader
       extra_params:
         sample_rate: 16000
-        max_length: 32000     # 2秒音频（关键）
+        n_mels: 128
   
   image_size: 224
 
-# ---------------------------------------------------------------------------
-# 类别配置（根据你的任务修改）
-# ---------------------------------------------------------------------------
 classes:
   num_classes: 3
-  class_names:
-    - None
-    - Weak
-    - Strong
+  class_names: [None, Strong, Weak]
 
-# ---------------------------------------------------------------------------
-# 模型配置
-# ---------------------------------------------------------------------------
 model:
-  backbone: audio_rawnet
-  pretrained: false
-  feature_dim: 512
-  
   backbones:
     audio:
-      type: audio_rawnet
+      type: audiocnn
+      pretrained: false
       feature_dim: 512
+      freeze: false
+      extra_params:
+        n_mels: 128
   
-  multimodal: false
+  fusion_type: attention
+  fusion_hidden_dim: 512
+  
+  dropout_rate: 0.1
+  classifier_hidden_dims: [256]
 
-# ---------------------------------------------------------------------------
-# 训练配置
-# ---------------------------------------------------------------------------
 train:
   epochs: 100
-  
-  # ⭐ 音频模型建议更小学习率
-  learning_rate: 0.0005
-  
+  learning_rate: 0.0003
   weight_decay: 0.0001
-  
   lr_scheduler: cosine
   warmup_epochs: 5
-  
-  optimizer: adamw   # ⭐ 推荐AdamW（比Adam更稳）
-  momentum: 0.9
-  
-  label_smoothing: 0.05  # ⭐ 不要太大
-  mixup_alpha: 0.0
-  cutmix_alpha: 0.0
-  
+  optimizer: adamw
+  label_smoothing: 0.1
   early_stop:
-    enabled: false
-    patience: 15
+    enabled: true
+    patience: 25
     min_delta: 0.001
     monitor: accuracy
     mode: max
+  val_interval: 5
 
-# ---------------------------------------------------------------------------
-# 评估配置
-# ---------------------------------------------------------------------------
 eval:
-  metrics:
-    - accuracy
-    - precision
-    - recall
-    - f1
+  metrics: [accuracy, precision, recall, f1]
   save_predictions: true
   confusion_matrix: true
 
-# ---------------------------------------------------------------------------
-# 系统配置
-# ---------------------------------------------------------------------------
 system:
   seed: 42
-  gpu_ids:
-    - 0
-    - 1
-    - 2
-    - 3
-  distributed: false
-  fp16: true   # ⭐ 推荐开启（音频训练很适合）
-  
-  log_interval: 10
+  gpu_ids: [0,1,2,3]
+  distributed: true
+  fp16: false
+  log_interval: 20
   save_interval: 10
-  
-  output_dir: output/audio_rawnet
-  
+  output_dir: output/fish_feeding_audio
   resume: ""
-  
   dist_backend: nccl
   dist_url: env://
-  
   tensorboard_enabled: true
-  experiment_name: "audio_rawnet_baseline"
+  experiment_name: "fish_feeding_audio"

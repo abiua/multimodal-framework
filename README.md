@@ -355,6 +355,12 @@ python -m tools.train --config configs/default.yaml --resume output/checkpoint_e
 # 分布式训练（单机多卡）
 CUDA_VISIBLE_DEVICES=0,1,2,3 PYTHONPATH=/home/pythoner/abiu/multimodal-framework python -m torch.distributed.launch --nproc_per_node=4 tools/train.py --config configs/default.yaml
 
+CUDA_VISIBLE_DEVICES=0,1,2,3 \
+torchrun --nproc_per_node=4 \
+--master_port=29501 \
+-m tools.train \
+--config configs/fish_feeding_image_only.yaml
+
 # 打开tensorboard
 tensorboard --port=6006 --logdir=output/fish_feeding_image_only_4gpu/tensorboard
 ```
