@@ -1,0 +1,253 @@
+# ============================================================================
+# Fish Feeding Intensity 跨模态知识蒸馏配置
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# 教师配置 (三模态 - SOTA模型)
+# ---------------------------------------------------------------------------
+teacher:
+  # 数据配置
+  data:
+    batch_size: 32
+    num_workers: 4
+    pin_memory: true
+    
+    # 数据路径
+    train_path: "data/fish_feeding/train"
+    val_path: "data/fish_feeding/val"
+    test_path: "data/fish_feeding/test"
+    
+    # 使用的模态列表
+    modalities:
+      - image
+      - audio
+      - wave
+    
+    # 每个模态的数据加载器配置
+    loaders:
+      image:
+        type: image_loader
+        extra_params: {}
+      
+      audio:
+        type: audio_loader
+        extra_params:
+          sample_rate: 16000
+          n_mels: 128
+      
+      wave:
+        type: wave_loader
+        extra_params:
+          max_length: 512
+          num_features: 6
+          normalize: true
+    
+    image_size: 224
+
+  # 类别配置
+  classes:
+    num_classes: 3
+    class_names:
+      - None
+      - Strong
+      - Weak
+
+  # 模型配置 - SOTA版本 (三模态教师模型)
+  model:
+    # 多模态时每个模态的backbone配置
+    backbones:
+      # 图像: Swin Transformer Base - CV SOTA
+      image:
+        type: swin_base
+        pretrained: true
+        feature_dim: 1024
+        freeze: false
+        extra_params: {}
+      
+      # 音频: AST (Audio Spectrogram Transformer) - 音频SOTA
+      audio:
+        type: ast
+        feature_dim: 768
+        freeze: false
+        extra_params:
+          n_mels: 128
+          patch_size: 16
+      
+      # 波形: PatchTST - 时序SOTA (2023 ICLR)
+      wave:
+        type: patchtst
+        feature_dim: 256
+        freeze: false
+        extra_params:
+          seq_len: 512
+          patch_size: 16
+          in_channels: 6
+          d_model: 128
+          n_heads: 8
+          n_layers: 6
+    
+    # 融合配置: concat, add, attention
+    fusion_type: attention
+    fusion_hidden_dim: 512
+    
+    # 分类头配置
+    dropout_rate: 0.1
+    classifier_hidden_dims: [256, 128]
+    
+    # 多模态模式
+    multimodal: true
+
+# ---------------------------------------------------------------------------
+# 学生配置 (双模态 - 轻量级模型)
+# ---------------------------------------------------------------------------
+student:
+  # 数据配置
+  data:
+    batch_size: 32
+    num_workers: 4
+    pin_memory: true
+    
+    # 数据路径
+    train_path: "data/fish_feeding/train"
+    val_path: "data/fish_feeding/val"
+    test_path: "data/fish_feeding/test"
+    
+    # 使用的模态列表: 仅使用 audio 和 wave 模态
+    modalities:
+      - audio
+      - wave
+    
+    # 每个模态的数据加载器配置
+    loaders:
+      audio:
+        type: audio_loader
+        extra_params:
+          sample_rate: 16000
+          n_mels: 128
+      
+      wave:
+        type: wave_loader
+        extra_params:
+          max_length: 512
+          num_features: 6
+          normalize: true
+    
+    image_size: 224
+
+  # 类别配置
+  classes:
+    num_classes: 3
+    class_names:
+      - None
+      - Strong
+      - Weak
+
+  # 模型配置 - 轻量级学生模型
+  model:
+    # 多模态时每个模态的backbone配置
+    backbones:
+      # 音频: 轻量级CNN
+      audio:
+        type: audiocnn
+        feature_dim: 512
+        freeze: false
+        extra_params:
+          n_mels: 128
+      
+      # 波形: 轻量级PatchTST
+      wave:
+        type: patchtst
+        feature_dim: 256
+        freeze: false
+        extra_params:
+          seq_len: 512
+          patch_size: 32  # 更大的patch以减少参数
+          in_channels: 6
+          d_model: 64     # 更小的模型维度
+          n_heads: 4      # 更少的注意力头
+          n_layers: 3     # 更少的层数
+    
+    # 融合配置: concat
+    fusion_type: concat
+    fusion_hidden_dim: 256
+    
+    # 分类头配置
+    dropout_rate: 0.1
+    classifier_hidden_dims: [128]
+    
+    # 多模态模式
+    multimodal: true
+
+# ---------------------------------------------------------------------------
+# 蒸馏超参数配置
+# ---------------------------------------------------------------------------
+distillation:
+  temperature: 4.0         # 温度参数，控制软标签的平滑程度
+  alpha: 0.7              # 蒸馏损失权重 (1-alpha为硬标签损失权重)
+  contrastive_weight: 0.3 # 对比损失权重
+
+# ---------------------------------------------------------------------------
+# 训练配置
+# ---------------------------------------------------------------------------
+train:
+  epochs: 100
+  learning_rate: 0.001
+  weight_decay: 0.01
+  
+  # 学习率调度器: cosine, step, plateau
+  lr_scheduler: cosine
+  warmup_epochs: 5
+  step_size: 30
+  gamma: 0.1
+  
+  # 优化器: adam, sgd, adamw
+  optimizer: adamw
+  momentum: 0.9
+  
+  # 正则化
+  label_smoothing: 0.1
+  mixup_alpha: 0.0
+  cutmix_alpha: 0.0
+  
+  # Early Stop 配置
+  early_stop:
+    enabled: true
+    patience: 20
+    min_delta: 0.001
+    monitor: accuracy
+    mode: max
+  
+  val_interval: 5
+  log_interval: 10
+
+# ---------------------------------------------------------------------------
+# 评估配置
+# ---------------------------------------------------------------------------
+eval:
+  metrics:
+    - accuracy
+    - precision
+    - recall
+    - f1
+  save_predictions: true
+  confusion_matrix: true
+
+# ---------------------------------------------------------------------------
+# 系统配置
+# ---------------------------------------------------------------------------
+system:
+  seed: 42
+  gpu_ids:
+    - 0
+  distributed: false
+  fp16: true  # 启用混合精度训练加速
+  
+  log_interval: 10
+  save_interval: 10
+  
+  output_dir: output/distillation_cross_modal
+  resume: ""
+  
+  # TensorBoard配置
+  tensorboard_enabled: true
+  experiment_name: "distillation_cross_modal"

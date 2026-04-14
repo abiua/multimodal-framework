@@ -1,0 +1,136 @@
+# ============================================================================
+# Fish Feeding Intensity 单模态（六轴传感器）分类配置
+# ============================================================================
+
+# ---------------------------------------------------------------------------
+# 数据配置
+# ---------------------------------------------------------------------------
+data:
+  batch_size: 32
+  num_workers: 4
+  pin_memory: true
+
+  # 数据路径
+  train_path: "data/fish_feeding/train"
+  val_path: "data/fish_feeding/val"
+  test_path: "data/fish_feeding/test"
+
+  # 使用的模态列表: 仅使用 wave 模态
+  modalities:
+  - wave
+
+  # 每个模态的数据加载器配置
+  loaders:
+    wave:
+      type: wave_loader
+      extra_params:
+        max_length: 512
+        num_features: 9
+        normalize: true
+
+# ---------------------------------------------------------------------------
+# 类别配置
+# ---------------------------------------------------------------------------
+classes:
+  num_classes: 3
+  class_names:
+  - None
+  - Strong
+  - Weak
+
+# ---------------------------------------------------------------------------
+# 模型配置
+# ---------------------------------------------------------------------------
+model:
+  # 单模态backbone配置
+  backbones:
+    wave:
+      type: patchtst
+      feature_dim: 256
+      freeze: false
+      extra_params:
+        seq_len: 512
+        patch_size: 16
+        in_channels: 9
+        d_model: 128
+        n_heads: 8
+        n_layers: 6
+
+  # 分类头配置
+  dropout_rate: 0.1
+  classifier_hidden_dims: [256]
+
+  # 单模态模式
+  multimodal: false
+
+# ---------------------------------------------------------------------------
+# 训练配置
+# ---------------------------------------------------------------------------
+train:
+  epochs: 100
+  learning_rate: 0.001
+  weight_decay: 0.0001
+
+  # 学习率调度器: cosine, step, plateau
+  lr_scheduler: cosine
+  warmup_epochs: 5
+  step_size: 30
+  gamma: 0.1
+
+  # 优化器: adam, sgd, adamw
+  optimizer: adamw
+  momentum: 0.9
+
+  # 正则化
+  label_smoothing: 0.1
+  mixup_alpha: 0.0
+  cutmix_alpha: 0.0
+
+  # Early Stop 配置
+  early_stop:
+    enabled: true
+    patience: 25
+    min_delta: 0.001
+    monitor: accuracy
+    mode: max
+
+  val_interval: 5
+
+# ---------------------------------------------------------------------------
+# 评估配置
+# ---------------------------------------------------------------------------
+eval:
+  metrics:
+  - accuracy
+  - precision
+  - recall
+  - f1
+  save_predictions: true
+  confusion_matrix: true
+
+# ---------------------------------------------------------------------------
+# 系统配置
+# ---------------------------------------------------------------------------
+system:
+  seed: 42
+  gpu_ids:
+  - 0
+  - 1
+  - 2
+  - 3
+  distributed: true
+  fp16: true
+
+  log_interval: 20
+  save_interval: 10
+
+  output_dir: output/fish_feeding_wave_only_4gpu
+  resume: ""
+
+  # 分布式训练配置
+  dist_backend: nccl
+  dist_url: env://
+
+  # TensorBoard配置
+  tensorboard_enabled: true
+  experiment_name: "fish_feeding_wave_only_4gpu"

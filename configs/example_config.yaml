@@ -1,0 +1,141 @@
+# ============================================================================
+# 配置文件使用说明
+ - 如何配置模型参数
+============================================================================
+
+# ---------------------------------------------------------------------------
+# 数据配置
+# ---------------------------------------------------------------------------
+data:
+  batch_size: 32
+  num_workers: 4
+  pin_memory: true
+
+# 数据路径
+  train_path: "data/train"
+  val_path: "data/val"
+  test_path: "data/test"
+
+# 使用的模态列表: image, text, audio, video
+  modalities:
+    - image
+    - text
+
+# 每个模态的数据加载器配置
+  loaders:
+    image:
+      type: image_loader
+      extra_params: {}
+
+# ---------------------------------------------------------------------------
+# 类别配置
+# ---------------------------------------------------------------------------
+classes:
+  num_classes: 10
+  class_names:
+    - class_0
+    - class_1
+    - class_2
+    - class_3
+    - class_4
+    - class_5
+    - class_6
+    - class_7
+    - class_8
+    - class_9
+
+# ---------------------------------------------------------------------------
+# 模型配置
+# ---------------------------------------------------------------------------
+model:
+  # 单模态时的默认backbone
+  backbone: resnet18
+  pretrained: true
+  feature_dim: 512
+
+# 多模态时每个模态的backbone配置
+  backbones:
+    image:
+      type: resnet18
+      pretrained: true
+      feature_dim: 512
+      freeze: false
+      extra_params: {}
+
+# 融合配置: concat, add, attention
+  fusion_type: concat
+  fusion_hidden_dim: 512
+
+# 分类头配置
+  dropout_rate: 0.1
+  classifier_hidden_dims: null
+
+# 是否多模态
+  multimodal: true
+
+# ---------------------------------------------------------------------------
+# 训练配置
+# ---------------------------------------------------------------------------
+train:
+  epochs: 100
+  learning_rate: 0.001
+  weight_decay: 0.001
+
+# 学习率调度器: cosine, step, plateau
+  lr_scheduler: cosine
+  warmup_epochs: 5
+  step_size: 30
+  gamma: 0.1
+
+# 优化器: adam, sgd, adamw
+  optimizer: adam
+  momentum: 0.9
+
+# 正则化
+  label_smoothing: 0.1
+  mixup_alpha: 0.0
+  cutmix_alpha: 0.0
+
+# Early Stop 配置
+  early_stop:
+    enabled: true
+    patience: 10
+    min_delta: 0.001
+    monitor: accuracy
+    mode: max
+
+# ---------------------------------------------------------------------------
+# 评估配置
+# ---------------------------------------------------------------------------
+eval:
+  metrics:
+    - accuracy
+    - precision
+    - recall
+    - f1
+  save_predictions: true
+  confusion_matrix: true
+
+# ---------------------------------------------------------------------------
+# 系统配置
+# ---------------------------------------------------------------------------
+system:
+  seed: 42
+  gpu_ids:
+    - 0
+  distributed: false
+  fp16: false
+
+  log_interval: 10
+  save_interval: 10
+
+  output_dir: output
+  resume: ""
+
+# 分布式训练配置
+  dist_backend: nccl
+  dist_url: env://
+
+# TensorBoard配置
+  tensorboard_enabled: true
+  experiment_name: "default"
