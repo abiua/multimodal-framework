@@ -62,8 +62,10 @@ class MultimodalFusion(nn.Module):
                 nn.Dropout(dropout_rate)
             )
         elif fusion_type == 'add':
-            # 确保所有维度相同
             assert len(set(feature_dims)) == 1, "加法融合要求所有特征维度相同"
+            self.projections = nn.ModuleList([
+                nn.Identity() for _ in feature_dims
+            ])
             self.fusion = nn.Sequential(
                 nn.Linear(feature_dims[0], output_dim),
                 nn.ReLU(),

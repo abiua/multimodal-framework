@@ -5,26 +5,73 @@ from typing import Dict, List, Optional, Any
 from .registry import ModelZoo
 from .heads import ClassifierHead, MultimodalFusion
 
+class StageableBackbone(nn.Module):
+    num_stages = 4
+
+    def init_state(self, **inputs):
+        """把原始输入转成后续逐 stage 传播的 state"""
+        raise NotImplementedError
+
+    def forward_stage(self, state, stage_idx: int):
+        """只执行一个 stage，返回新的 state"""
+        raise NotImplementedError
+
+    def forward_head(self, state):
+        """stage 全跑完后，做 pool/proj，输出最终特征向量"""
+        raise NotImplementedError
+
+    def forward(self, **inputs):
+        state = self.init_state(**inputs)
+        for stage_idx in range(self.num_stages):
+            state = self.forward_stage(state, stage_idx)
+        return self.forward_head(state)
+    
+class StageFusionAdapter(nn.Module):
+    def __init__(self, common_dim, modality_channels):
+        super().__init__()
+        self.to_common = nn.ModuleDict({
+            m: nn.ConvNd(c, common_dim, kernel_size=1)   # 1d/2d 要按模态写
+            for m, c in modality_channels.items()
+        })
+        self.back_to_modality = nn.ModuleDict({
+            m: nn.ConvNd(common_dim, c, kernel_size=1)
+            for m, c in modality_channels.items()
+        })
+
+    def forward(self, states):
+        projected = {m: self.to_common[m](x) for m, x in states.items()}
+        fused = sum(projected.values()) / len(projected)
+
+        out = {}
+        for m, x in states.items():
+            delta = self.back_to_modality[m](fused)
+            out[m] = x + delta
+        return out
 
 class MultimodalClassifier(nn.Module):
     """多模态分类模型(重构版)"""
     
-    def __init__(
-        self,
-        config,
-        backbones: nn.ModuleDict,
-        classifier_head: nn.Module,
-        fusion: Optional[nn.Module] = None,
-    ):
+    def __init__(self, config, backbones, classifier_head, fusion=None,
+                 use_staged_forward=False, fusion_stages=(1, 2)):
         super().__init__()
         self.config = config
         self.backbones = backbones
         self.classifier_head = classifier_head
         self.fusion = fusion
+        self.use_staged_forward = use_staged_forward
+        self.fusion_stages = set(fusion_stages)
+
+        # 可选：每个 stage 一个融合模块
+        self.stage_fusions = nn.ModuleDict({
+            str(i): StageFusionAdapter(config, backbones) for i in fusion_stages
+        })
     
     def forward(self, batch: Dict[str, Any]) -> torch.Tensor:
         """前向传播"""
-        features = self.extract_features(batch)
+        if self.use_staged_forward:
+            features = self.extract_features_staged(batch)
+        else:
+            features = self.extract_features(batch)
         return self.classifier_head(features)
     
     def extract_features(self, batch: Dict[str, Any]) -> torch.Tensor:
@@ -64,6 +111,45 @@ class MultimodalClassifier(nn.Module):
             return self.fusion(features)
             
         return torch.cat(features, dim=1)
+    
+    def extract_features_staged(self, batch):
+        states = {}
+
+        # init
+        for modality, backbone in self.backbones.items():
+            if modality not in batch:
+                continue
+            inputs = batch[modality]
+            if isinstance(inputs, torch.Tensor):
+                states[modality] = backbone.init_state(x=inputs)
+            else:
+                states[modality] = backbone.init_state(**inputs)
+
+        if not states:
+            raise ValueError("输入批次中没有找到可用模态数据")
+
+        # stage loop
+        for stage_idx in range(4):
+            for modality, backbone in self.backbones.items():
+                if modality not in states:
+                    continue
+                states[modality] = backbone.forward_stage(states[modality], stage_idx)
+
+            if stage_idx in self.fusion_stages:
+                states = self.stage_fusions[str(stage_idx)](states)
+
+        # head
+        feats = []
+        for modality, backbone in self.backbones.items():
+            if modality not in states:
+                continue
+            feats.append(backbone.forward_head(states[modality]))
+
+        if len(feats) == 1:
+            return feats[0]
+        if self.fusion:
+            return self.fusion(feats)
+        return torch.cat(feats, dim=1)
 
 
 class ModelBuilder:

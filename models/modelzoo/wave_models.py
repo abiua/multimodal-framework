@@ -281,7 +281,44 @@ class TemporalBlock(nn.Module):
         if self.downsample is not None:
             residual = self.downsample(residual)
         return self.relu(out + residual)
+    
+@register_backbone('tcn_stageable', description='Stageable TCN', modality='wave')
+class TCNStageable(nn.Module):
+    num_stages = 4
 
+    def __init__(self, feature_dim=256, seq_len=512, in_channels=6,
+                 hidden_channels=64, n_layers=6, kernel_size=3, dropout=0.2, **kwargs):
+        super().__init__()
+        self.feature_dim = feature_dim
+
+        layers = []
+        for i in range(n_layers):
+            dilation = 2 ** i
+            in_ch = in_channels if i == 0 else hidden_channels
+            layers.append(TemporalBlock(in_ch, hidden_channels, kernel_size, dilation, dropout))
+
+        # 6层 -> 4个stage
+        self.stages = nn.ModuleList([
+            nn.Sequential(*layers[0:2]),
+            nn.Sequential(*layers[2:4]),
+            nn.Sequential(*layers[4:5]),
+            nn.Sequential(*layers[5:6]),
+        ])
+
+        self.pool = nn.AdaptiveAvgPool1d(1)
+        self.proj = nn.Linear(hidden_channels, feature_dim)
+
+    def init_state(self, x):
+        if x.dim() == 3 and x.shape[1] > x.shape[2]:
+            x = x.transpose(1, 2)   # [B, C, T]
+        return x
+
+    def forward_stage(self, state, stage_idx: int):
+        return self.stages[stage_idx](state)
+
+    def forward_head(self, state):
+        x = self.pool(state).squeeze(-1)
+        return self.proj(x)
 
 @register_backbone('tcn', description='TCN时序卷积特征提取器', modality='wave')
 class TCN(nn.Module):
