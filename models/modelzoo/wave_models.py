@@ -320,6 +320,12 @@ class TCNStageable(nn.Module):
         x = self.pool(state).squeeze(-1)
         return self.proj(x)
 
+    def forward(self, x):
+        state = self.init_state(x)
+        for stage_idx in range(self.num_stages):
+            state = self.forward_stage(state, stage_idx)
+        return self.forward_head(state)
+
 @register_backbone('tcn', description='TCN时序卷积特征提取器', modality='wave')
 class TCN(nn.Module):
     """Temporal Convolutional Network - 轻量级时序特征提取器

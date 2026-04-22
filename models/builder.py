@@ -27,26 +27,17 @@ class StageableBackbone(nn.Module):
         return self.forward_head(state)
     
 class StageFusionAdapter(nn.Module):
-    def __init__(self, common_dim, modality_channels):
+    def __init__(self, common_dim=None, modality_channels=None, mode="identity"):
         super().__init__()
-        self.to_common = nn.ModuleDict({
-            m: nn.ConvNd(c, common_dim, kernel_size=1)   # 1d/2d 要按模态写
-            for m, c in modality_channels.items()
-        })
-        self.back_to_modality = nn.ModuleDict({
-            m: nn.ConvNd(common_dim, c, kernel_size=1)
-            for m, c in modality_channels.items()
-        })
+        self.common_dim = common_dim
+        self.modality_channels = modality_channels or {}
+        self.mode = mode
+
+        self.to_common = nn.ModuleDict()
+        self.back_to_modality = nn.ModuleDict()
 
     def forward(self, states):
-        projected = {m: self.to_common[m](x) for m, x in states.items()}
-        fused = sum(projected.values()) / len(projected)
-
-        out = {}
-        for m, x in states.items():
-            delta = self.back_to_modality[m](fused)
-            out[m] = x + delta
-        return out
+        return states
 
 class MultimodalClassifier(nn.Module):
     """多模态分类模型(重构版)"""
@@ -58,13 +49,16 @@ class MultimodalClassifier(nn.Module):
         self.backbones = backbones
         self.classifier_head = classifier_head
         self.fusion = fusion
-        self.use_staged_forward = use_staged_forward
-        self.fusion_stages = set(fusion_stages)
 
-        # 可选：每个 stage 一个融合模块
-        self.stage_fusions = nn.ModuleDict({
-            str(i): StageFusionAdapter(config, backbones) for i in fusion_stages
-        })
+        self.use_staged_forward = use_staged_forward
+        self.fusion_stages = set(fusion_stages) if fusion_stages is not None else set()
+
+        if self.use_staged_forward and self.fusion_stages:
+            self.stage_fusions = nn.ModuleDict({
+                str(i): StageFusionAdapter(config, backbones) for i in self.fusion_stages
+            })
+        else:
+            self.stage_fusions = nn.ModuleDict()
     
     def forward(self, batch: Dict[str, Any]) -> torch.Tensor:
         """前向传播"""
@@ -260,5 +254,7 @@ class ModelBuilder:
             config=config,
             backbones=backbones,
             classifier_head=classifier_head,
-            fusion=fusion
+            fusion=fusion,
+            use_staged_forward=getattr(config.model, "use_staged_forward", False),
+            fusion_stages=getattr(config.model, "fusion_stages", ()),
         )
