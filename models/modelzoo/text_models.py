@@ -1,8 +1,82 @@
 """文本模型"""
+import copy
 
 import torch
 import torch.nn as nn
 from ..registry import register_backbone
+
+@register_backbone('text_transformer_small_stageable',
+                   description='Stageable 小型Transformer文本特征提取器',
+                   modality='text')
+class TextTransformerSmallStageable(nn.Module):
+    num_stages = 4
+
+    def __init__(self, feature_dim=256, vocab_size=30000, embed_dim=128,
+                 num_heads=4, num_layers=4, dim_feedforward=512, dropout=0.1,
+                 max_len=512, **kwargs):
+        super().__init__()
+        if num_layers != 4:
+            raise ValueError("当前 stageable 版本固定要求 num_layers=4")
+
+        self.feature_dim = feature_dim
+        self.stage_dims = [embed_dim] * 4
+
+        self.embedding = nn.Embedding(vocab_size, embed_dim, padding_idx=0)
+        self.pos_encoder = PositionalEncoding(embed_dim, max_len, dropout)
+
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=embed_dim,
+            nhead=num_heads,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            batch_first=True
+        )
+        self.layers = nn.ModuleList([copy.deepcopy(encoder_layer) for _ in range(4)])
+
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        nn.init.normal_(self.cls_token, std=0.02)
+
+        self.proj = nn.Linear(embed_dim, feature_dim)
+        self.dropout = nn.Dropout(dropout)
+
+    def init_state(self, input_ids, attention_mask=None):
+        x = self.embedding(input_ids)   # [B, L, C]
+
+        batch_size = x.size(0)
+        cls_tokens = self.cls_token.expand(batch_size, -1, -1)
+        x = torch.cat([cls_tokens, x], dim=1)
+
+        if attention_mask is not None:
+            cls_mask = torch.ones(batch_size, 1, device=attention_mask.device, dtype=attention_mask.dtype)
+            attention_mask = torch.cat([cls_mask, attention_mask], dim=1)
+
+        x = self.pos_encoder(x)
+        return {"x": x, "attention_mask": attention_mask}
+
+    def forward_stage(self, state, stage_idx: int):
+        x = state["x"]
+        attention_mask = state["attention_mask"]
+
+        if attention_mask is not None:
+            src_key_padding_mask = (attention_mask == 0)
+            x = self.layers[stage_idx](x, src_key_padding_mask=src_key_padding_mask)
+        else:
+            x = self.layers[stage_idx](x)
+
+        out = dict(state)
+        out["x"] = x
+        return out
+
+    def forward_head(self, state):
+        cls_feat = state["x"][:, 0, :]
+        cls_feat = self.dropout(cls_feat)
+        return self.proj(cls_feat)
+
+    def forward(self, input_ids, attention_mask=None):
+        state = self.init_state(input_ids=input_ids, attention_mask=attention_mask)
+        for stage_idx in range(self.num_stages):
+            state = self.forward_stage(state, stage_idx)
+        return self.forward_head(state)
 
 
 @register_backbone('textlstm', description='LSTM文本特征提取器', modality='text')

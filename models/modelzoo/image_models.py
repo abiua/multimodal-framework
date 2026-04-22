@@ -5,6 +5,48 @@ import torch.nn as nn
 import torchvision.models as models
 from ..registry import register_backbone
 
+@register_backbone('resnet18_stageable', description='Stageable ResNet18', modality='image')
+class ResNet18Stageable(nn.Module):
+    num_stages = 4
+
+    def __init__(self, feature_dim=512, pretrained=True, **kwargs):
+        super().__init__()
+        backbone = models.resnet18(pretrained=pretrained)
+        self.stage_dims = [64, 128, 256, 512]
+
+        self.stem = nn.Sequential(
+            backbone.conv1,
+            backbone.bn1,
+            backbone.relu,
+            backbone.maxpool,
+        )
+        self.stages = nn.ModuleList([
+            backbone.layer1,  # stage 0
+            backbone.layer2,  # stage 1
+            backbone.layer3,  # stage 2
+            backbone.layer4,  # stage 3
+        ])
+        self.pool = backbone.avgpool
+        self.proj = nn.Linear(512, feature_dim) if feature_dim != 512 else nn.Identity()
+        self.feature_dim = feature_dim
+
+    def init_state(self, x):
+        x = self.stem(x)
+        return x
+
+    def forward_stage(self, state, stage_idx: int):
+        return self.stages[stage_idx](state)
+
+    def forward_head(self, state):
+        x = self.pool(state)
+        x = torch.flatten(x, 1)
+        return self.proj(x)
+
+    def forward(self, x):
+        state = self.init_state(x)
+        for stage_idx in range(self.num_stages):
+            state = self.forward_stage(state, stage_idx)
+        return self.forward_head(state)
 
 @register_backbone('resnet18', description='ResNet18图像特征提取器', modality='image')
 class ResNet18(nn.Module):

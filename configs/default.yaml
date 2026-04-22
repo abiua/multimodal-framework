@@ -117,6 +117,10 @@ model:
   
   # 是否多模态
   multimodal: true
+  use_staged_forward: true
+  fusion_stages: [1, 2]
+  stage_fusion_common_dim: 128
+  stage_fusion_mode: mean
 
 # ---------------------------------------------------------------------------
 # 训练配置

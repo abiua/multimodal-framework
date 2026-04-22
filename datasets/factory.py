@@ -151,13 +151,7 @@ class MultimodalDataset(Dataset):
             if transform:
                 data = transform(data)
             
-            if isinstance(data, dict):
-                if len(data) == 1:
-                    item[modality] = next(iter(data.values()))
-                else:
-                    item.update({f'{modality}_{k}': v for k, v in data.items()})
-            else:
-                item[modality] = data
+            item[modality] = data
 
             # 添加到item
             # if modality == 'text' and isinstance(data, dict):

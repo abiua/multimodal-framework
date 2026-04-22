@@ -4,6 +4,58 @@ import torch
 import torch.nn as nn
 from ..registry import register_backbone
 
+@register_backbone('audiocnn_stageable', description='Stageable AudioCNN', modality='audio')
+class AudioCNNStageable(nn.Module):
+    num_stages = 4
+
+    def __init__(self, feature_dim=512, n_mels=128, dropout=0.1, **kwargs):
+        super().__init__()
+        self.feature_dim = feature_dim
+        self.stage_dims = [32, 64, 128, 128]
+        self.stages = nn.ModuleList([
+            nn.Sequential(
+                nn.Conv2d(1, 32, 3, padding=1),
+                nn.BatchNorm2d(32),
+                nn.ReLU(),
+                nn.MaxPool2d(2),
+            ),
+            nn.Sequential(
+                nn.Conv2d(32, 64, 3, padding=1),
+                nn.BatchNorm2d(64),
+                nn.ReLU(),
+                nn.MaxPool2d(2),
+            ),
+            nn.Sequential(
+                nn.Conv2d(64, 128, 3, padding=1),
+                nn.BatchNorm2d(128),
+                nn.ReLU(),
+                nn.MaxPool2d(2),
+            ),
+            nn.Sequential(
+                nn.Conv2d(128, 128, 3, padding=1),
+                nn.BatchNorm2d(128),
+                nn.ReLU(),
+            ),
+        ])
+
+        self.pool = nn.AdaptiveAvgPool2d(1)
+        self.proj = nn.Sequential(
+            nn.Linear(128, feature_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+        )
+
+    def init_state(self, x):
+        if x.dim() == 3:
+            x = x.unsqueeze(1)   # [B, 1, H, W]
+        return x
+
+    def forward_stage(self, state, stage_idx: int):
+        return self.stages[stage_idx](state)
+
+    def forward_head(self, state):
+        x = self.pool(state).flatten(1)
+        return self.proj(x)
 
 @register_backbone('audiocnn', description='CNN音频特征提取器（基于梅尔频谱图）', modality='audio')
 class AudioCNN(nn.Module):
