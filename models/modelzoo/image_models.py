@@ -12,6 +12,7 @@ class ResNet18Stageable(nn.Module):
     def __init__(self, feature_dim=512, pretrained=True, **kwargs):
         super().__init__()
         backbone = models.resnet18(pretrained=pretrained)
+        self.stage_dims = [64, 128, 256, 512]
 
         self.stem = nn.Sequential(
             backbone.conv1,

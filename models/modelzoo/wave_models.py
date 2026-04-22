@@ -290,7 +290,7 @@ class TCNStageable(nn.Module):
                  hidden_channels=64, n_layers=6, kernel_size=3, dropout=0.2, **kwargs):
         super().__init__()
         self.feature_dim = feature_dim
-
+        self.stage_dims = [hidden_channels] * 4
         layers = []
         for i in range(n_layers):
             dilation = 2 ** i

@@ -1,6 +1,7 @@
 import unittest
-from types import SimpleNamespace
+import torch
 
+from types import SimpleNamespace
 from models.builder import ModelBuilder, StageFusionAdapter
 
 
@@ -24,6 +25,8 @@ class TestBuilderRegressions(unittest.TestCase):
                 classifier_hidden_dims=[],
                 use_staged_forward=True,
                 fusion_stages=[0, 3],
+                stage_fusion_common_dim=16,
+                stage_fusion_mode="mean",
             ),
             classes=SimpleNamespace(num_classes=5),
         )
@@ -33,18 +36,40 @@ class TestBuilderRegressions(unittest.TestCase):
         self.assertTrue(model.use_staged_forward)
         self.assertEqual(model.fusion_stages, {0, 3})
 
-    @unittest.expectedFailure
     def test_stage_fusion_adapter_should_be_constructible(self):
         adapter = StageFusionAdapter(
-            common_dim=16,
-            modality_channels={
+            stage_dims={
                 "image": 32,
                 "wave": 64,
             },
+            common_dim=16,
+            mode="mean",
         )
 
         self.assertIn("image", adapter.to_common)
         self.assertIn("wave", adapter.to_common)
+        self.assertIn("image", adapter.back_to_modality)
+        self.assertIn("wave", adapter.back_to_modality)
+
+    def test_stage_fusion_adapter_forward_preserves_shapes(self):
+        adapter = StageFusionAdapter(
+            stage_dims={
+                "image": 32,
+                "wave": 16,
+            },
+            common_dim=8,
+            mode="mean",
+        )
+
+        states = {
+            "image": torch.randn(2, 32, 8, 8),
+            "wave": torch.randn(2, 16, 20),
+        }
+
+        out = adapter(states)
+
+        self.assertEqual(out["image"].shape, states["image"].shape)
+        self.assertEqual(out["wave"].shape, states["wave"].shape)
 
 
 if __name__ == "__main__":

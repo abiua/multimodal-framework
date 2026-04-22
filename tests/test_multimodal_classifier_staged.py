@@ -7,6 +7,7 @@ from models.builder import MultimodalClassifier
 
 class ToyStageableBackbone(nn.Module):
     num_stages = 4
+    stage_dims = [4, 4, 4, 4]
 
     def __init__(self, feature_dim=4):
         super().__init__()
@@ -31,6 +32,41 @@ class ToyStageableBackbone(nn.Module):
 
 
 class TestMultimodalClassifierStaged(unittest.TestCase):
+    def test_extract_features_staged_with_stage_fusion(self):
+        from types import SimpleNamespace
+
+        backbones = nn.ModuleDict({
+            "image": ToyStageableBackbone(feature_dim=4),
+            "wave": ToyStageableBackbone(feature_dim=4),
+        })
+
+        config = SimpleNamespace(
+            model=SimpleNamespace(
+                stage_fusion_common_dim=4,
+                stage_fusion_mode="mean",
+                dropout_rate=0.0,
+            )
+        )
+
+        model = MultimodalClassifier(
+            config=config,
+            backbones=backbones,
+            classifier_head=nn.Identity(),
+            fusion=None,
+            use_staged_forward=True,
+            fusion_stages=(1, 2),
+        )
+
+        batch = {
+            "image": torch.zeros(2, 4),
+            "wave": torch.ones(2, 4),
+        }
+
+        out = model(batch)
+
+        self.assertEqual(out.shape, (2, 8))
+        self.assertEqual(set(model.stage_fusions.keys()), {"1", "2"})
+
     def test_extract_features_staged_concat_without_stage_fusion(self):
         backbones = nn.ModuleDict({
             "image": ToyStageableBackbone(feature_dim=4),

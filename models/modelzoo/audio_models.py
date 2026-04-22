@@ -11,7 +11,7 @@ class AudioCNNStageable(nn.Module):
     def __init__(self, feature_dim=512, n_mels=128, dropout=0.1, **kwargs):
         super().__init__()
         self.feature_dim = feature_dim
-
+        self.stage_dims = [32, 64, 128, 128]
         self.stages = nn.ModuleList([
             nn.Sequential(
                 nn.Conv2d(1, 32, 3, padding=1),

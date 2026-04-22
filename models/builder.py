@@ -27,17 +27,123 @@ class StageableBackbone(nn.Module):
         return self.forward_head(state)
     
 class StageFusionAdapter(nn.Module):
-    def __init__(self, common_dim=None, modality_channels=None, mode="identity"):
+    """
+    对每个模态当前 stage 的 state 先做全局汇聚 -> 投到公共空间 -> 融合 ->
+    再投回各模态当前通道数，以 residual 方式回注。
+    """
+    def __init__(self, stage_dims, common_dim=128, mode="mean", dropout=0.0):
         super().__init__()
+        if not stage_dims:
+            raise ValueError("stage_dims 不能为空")
+
+        self.stage_dims = dict(stage_dims)
         self.common_dim = common_dim
-        self.modality_channels = modality_channels or {}
         self.mode = mode
 
-        self.to_common = nn.ModuleDict()
-        self.back_to_modality = nn.ModuleDict()
+        self.to_common = nn.ModuleDict({
+            modality: nn.Sequential(
+                nn.LayerNorm(dim),
+                nn.Linear(dim, common_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+            )
+            for modality, dim in self.stage_dims.items()
+        })
+
+        self.back_to_modality = nn.ModuleDict({
+            modality: nn.Sequential(
+                nn.Linear(common_dim, dim),
+                nn.Tanh(),
+            )
+            for modality, dim in self.stage_dims.items()
+        })
+
+        self.gates = nn.ModuleDict({
+            modality: nn.Sequential(
+                nn.Linear(common_dim, dim),
+                nn.Sigmoid(),
+            )
+            for modality, dim in self.stage_dims.items()
+        })
+
+    def _summarize_state(self, state):
+        """
+        返回:
+            summary: [B, C]
+            layout:  当前 state 的布局标记
+        支持:
+            - Tensor [B, C]
+            - Tensor [B, C, T]
+            - Tensor [B, C, H, W]
+            - Dict state, 其中 state["x"] 为 [B, L, C]（给后续 stageable text 预留）
+        """
+        if isinstance(state, dict):
+            if "x" not in state:
+                raise TypeError("dict state 必须包含键 'x'")
+            x = state["x"]
+            if x.dim() != 3:
+                raise TypeError(f"暂不支持的 dict state 形状: {tuple(x.shape)}")
+            return x.mean(dim=1), "blc"
+
+        if not isinstance(state, torch.Tensor):
+            raise TypeError(f"不支持的 state 类型: {type(state)}")
+
+        if state.dim() == 2:
+            return state, "bc"
+        if state.dim() == 3:
+            # 当前 wave/tcn 是 [B, C, T]
+            return state.mean(dim=-1), "bct"
+        if state.dim() == 4:
+            return state.mean(dim=(-2, -1)), "bchw"
+
+        raise TypeError(f"不支持的 state 形状: {tuple(state.shape)}")
+
+    def _inject(self, state, delta, gate, layout):
+        mod = delta * gate
+
+        if layout == "bc":
+            return state + mod
+
+        if layout == "bct":
+            return state + mod.unsqueeze(-1)
+
+        if layout == "bchw":
+            return state + mod.unsqueeze(-1).unsqueeze(-1)
+
+        if layout == "blc":
+            out = dict(state)
+            out["x"] = state["x"] + mod.unsqueeze(1)
+            return out
+
+        raise ValueError(f"未知 layout: {layout}")
 
     def forward(self, states):
-        return states
+        summaries = {}
+        layouts = {}
+
+        for modality, state in states.items():
+            summary, layout = self._summarize_state(state)
+            summaries[modality] = summary
+            layouts[modality] = layout
+
+        projected = []
+        for modality, summary in summaries.items():
+            projected.append(self.to_common[modality](summary))
+
+        stacked = torch.stack(projected, dim=0)
+
+        if self.mode == "sum":
+            fused = stacked.sum(dim=0)
+        else:
+            fused = stacked.mean(dim=0)
+
+        out = {}
+        for modality, state in states.items():
+            delta = self.back_to_modality[modality](fused)
+            gate = self.gates[modality](fused)
+            out[modality] = self._inject(state, delta, gate, layouts[modality])
+
+        return out
 
 class MultimodalClassifier(nn.Module):
     """多模态分类模型(重构版)"""
@@ -53,12 +159,39 @@ class MultimodalClassifier(nn.Module):
         self.use_staged_forward = use_staged_forward
         self.fusion_stages = set(fusion_stages) if fusion_stages is not None else set()
 
-        if self.use_staged_forward and self.fusion_stages:
-            self.stage_fusions = nn.ModuleDict({
-                str(i): StageFusionAdapter(config, backbones) for i in self.fusion_stages
-            })
-        else:
-            self.stage_fusions = nn.ModuleDict()
+        self.num_stages = min(
+            getattr(backbone, "num_stages", 4) for backbone in self.backbones.values()
+        ) if len(self.backbones) > 0 else 4
+
+        self.stage_fusions = nn.ModuleDict()
+        if self.use_staged_forward and self.fusion_stages and len(self.backbones) > 1:
+            common_dim = getattr(getattr(config, "model", None), "stage_fusion_common_dim", 128)
+            mode = getattr(getattr(config, "model", None), "stage_fusion_mode", "mean")
+            dropout = getattr(getattr(config, "model", None), "dropout_rate", 0.0)
+
+            for stage_idx in sorted(self.fusion_stages):
+                stage_dims = self._collect_stage_dims(stage_idx)
+                self.stage_fusions[str(stage_idx)] = StageFusionAdapter(
+                    stage_dims=stage_dims,
+                    common_dim=common_dim,
+                    mode=mode,
+                    dropout=dropout,
+                )
+
+    def _collect_stage_dims(self, stage_idx: int):
+        stage_dims = {}
+        for modality, backbone in self.backbones.items():
+            dims = getattr(backbone, "stage_dims", None)
+            if dims is None:
+                raise ValueError(
+                    f"backbone '{modality}' 未定义 stage_dims，无法启用中期 stage fusion"
+                )
+            if stage_idx >= len(dims):
+                raise ValueError(
+                    f"backbone '{modality}' 的 stage_dims 长度不足，无法访问 stage {stage_idx}"
+                )
+            stage_dims[modality] = dims[stage_idx]
+        return stage_dims
     
     def forward(self, batch: Dict[str, Any]) -> torch.Tensor:
         """前向传播"""
@@ -123,7 +256,7 @@ class MultimodalClassifier(nn.Module):
             raise ValueError("输入批次中没有找到可用模态数据")
 
         # stage loop
-        for stage_idx in range(4):
+        for stage_idx in range(self.num_stages):
             for modality, backbone in self.backbones.items():
                 if modality not in states:
                     continue
