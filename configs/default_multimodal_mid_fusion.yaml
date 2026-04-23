@@ -41,32 +41,26 @@ classes:
 model:
   backbones:
     image:
-      type: resnet18_stageable
+      type: resnet18
       pretrained: true
       feature_dim: 512
       freeze: false
       extra_params: {}
 
     audio:
-      type: audiocnn_stageable
+      type: audiocnn
       pretrained: false
       feature_dim: 512
       freeze: false
       extra_params:
         n_mels: 128
 
-  # 当前公开 builder 无法关闭最终 fusion；
-  # 用 add 作为“最轻”的末端融合近似 mid-only
-  fusion_type: add
+  fusion_type: attention
   fusion_hidden_dim: 512
+  mid_fusion_enabled: true
 
   dropout_rate: 0.1
   classifier_hidden_dims: [256]
-
-  use_staged_forward: true
-  fusion_stages: [1, 2]
-  stage_fusion_common_dim: 128
-  stage_fusion_mode: mean
 
 train:
   epochs: 100

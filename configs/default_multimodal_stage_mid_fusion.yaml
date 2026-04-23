@@ -57,6 +57,7 @@ model:
 
   fusion_type: attention
   fusion_hidden_dim: 512
+  mid_fusion_enabled: true
 
   dropout_rate: 0.1
   classifier_hidden_dims: [256]
@@ -106,11 +107,11 @@ system:
   log_interval: 10
   save_interval: 10
 
-  output_dir: "output/default_multimodal_mid_late_fusion"
+  output_dir: "output/default_multimodal_stage_mid_fusion"
   resume: ""
 
   dist_backend: "nccl"
   dist_url: "env://"
 
   tensorboard_enabled: true
-  experiment_name: "default_multimodal_mid_late_fusion"
+  experiment_name: "default_multimodal_stage_mid_fusion"
