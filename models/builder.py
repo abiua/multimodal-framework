@@ -417,7 +417,7 @@ class ModelBuilder:
         fusion = None
         output_dim = feature_dims[0]
 
-        if len(feature_dims) > 1 and getattr(config.model, "late_fusion_enabled", True):
+        if len(feature_dims) > 1 and getattr(config.model, "mid_fusion_enabled", True):
             fusion = cls.build_fusion(
                 feature_dims=feature_dims,
                 output_dim=config.model.fusion_hidden_dim,

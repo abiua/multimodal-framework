@@ -69,7 +69,7 @@ class ModelConfig:
     # 最终 feature-level fusion（多模态时可选）
     fusion_type: str = "concat"
     fusion_hidden_dim: int = 512
-    late_fusion_enabled: bool = True
+    mid_fusion_enabled: bool = True
 
     # 分类头配置
     dropout_rate: float = 0.1

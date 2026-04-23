@@ -1,27 +1,35 @@
-# fish_feeding_image.yaml
-
 data:
   batch_size: 32
   num_workers: 4
   pin_memory: true
-  
-  train_path: "data/fish_feeding/train"
-  val_path: "data/fish_feeding/val"
-  test_path: "data/fish_feeding/test"
-  
+
+  train_path: "data/train"
+  val_path: "data/val"
+  test_path: "data/test"
+
   modalities:
     - image
-  
+
   loaders:
     image:
       type: image_loader
       extra_params: {}
-  
+
   image_size: 224
 
 classes:
-  num_classes: 3
-  class_names: [None, Strong, Weak]
+  num_classes: 10
+  class_names:
+    - class_0
+    - class_1
+    - class_2
+    - class_3
+    - class_4
+    - class_5
+    - class_6
+    - class_7
+    - class_8
+    - class_9
 
 model:
   backbones:
@@ -31,28 +39,39 @@ model:
       feature_dim: 512
       freeze: false
       extra_params: {}
-  
-  fusion_type: attention   # 单模态不会用到，但保留
+
+  fusion_type: concat
   fusion_hidden_dim: 512
-  
+  mid_fusion_enabled: true
+
   dropout_rate: 0.1
   classifier_hidden_dims: [256]
 
 train:
   epochs: 100
-  learning_rate: 0.0003
+  learning_rate: 0.001
   weight_decay: 0.0001
+
   lr_scheduler: cosine
   warmup_epochs: 5
-  optimizer: adamw
+  step_size: 30
+  gamma: 0.1
+
+  optimizer: adam
+  momentum: 0.9
+
   label_smoothing: 0.1
+  mixup_alpha: 0.0
+  cutmix_alpha: 0.0
+
   early_stop:
     enabled: true
-    patience: 25
+    patience: 10
     min_delta: 0.001
     monitor: accuracy
     mode: max
-  val_interval: 5
+
+  val_interval: 1
 
 eval:
   metrics: [accuracy, precision, recall, f1]
@@ -61,14 +80,18 @@ eval:
 
 system:
   seed: 42
-  gpu_ids: [0,1,2,3]
-  distributed: true
+  gpu_ids: [0]
+  distributed: false
   fp16: false
-  log_interval: 20
+
+  log_interval: 10
   save_interval: 10
-  output_dir: output/fish_feeding_image
+
+  output_dir: "output/default_solo"
   resume: ""
-  dist_backend: nccl
-  dist_url: env://
+
+  dist_backend: "nccl"
+  dist_url: "env://"
+
   tensorboard_enabled: true
-  experiment_name: "fish_feeding_image"
+  experiment_name: "default_solo"
