@@ -21,8 +21,7 @@ data:
   loaders:
     image:
       type: image_loader
-      extra_params:
-        image_size: 224
+      extra_params: {}
 
     audio:
       type: audio_loader_stereo
@@ -53,7 +52,7 @@ model:
   backbones:
     image:
       type: unireplknet_image
-      pretrained: true
+      pretrained: false
       feature_dim: 512
       freeze: false
       extra_params:
@@ -133,9 +132,6 @@ system:
 
   gpu_ids:
     - 0
-    - 1
-    - 2
-    - 3
 
   distributed: false
   fp16: false

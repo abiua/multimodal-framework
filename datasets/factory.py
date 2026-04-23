@@ -200,11 +200,9 @@ class DataFactory:
                 raise ValueError(f"模态 '{modality}' 没有可用的加载器，请在配置中指定")
             
             # 创建加载器
-            loaders[modality] = LoaderRegistry.create(
-                loader_type,
-                image_size=self.config.data.image_size,
-                **extra_params
-            )
+            loader_kwargs = dict(extra_params)
+            loader_kwargs.setdefault("image_size", self.config.data.image_size)
+            loaders[modality] = LoaderRegistry.create(loader_type, **loader_kwargs)
         
         return loaders
     

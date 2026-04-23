@@ -267,6 +267,17 @@ class Trainer:
         """获取当前学习率"""
         return self.optimizer.param_groups[0]['lr']
     
+    def _move_to_device(self, obj):
+        if isinstance(obj, torch.Tensor):
+            return obj.to(self.device, non_blocking=True)
+        if isinstance(obj, dict):
+            return {k: self._move_to_device(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [self._move_to_device(v) for v in obj]
+        if isinstance(obj, tuple):
+            return tuple(self._move_to_device(v) for v in obj)
+        return obj
+    
     def train_one_epoch(self) -> Dict[str, float]:
         """训练一个epoch"""
         self.model.train()
@@ -280,10 +291,7 @@ class Trainer:
             batch_start_time = time.time()
 
             # 移动数据到设备
-            batch = {
-                k: v.to(self.device) if isinstance(v, torch.Tensor) else v
-                for k, v in batch.items()
-            }
+            batch = self._move_to_device(batch)
 
             batch_size = batch['class_idx'].size(0)
 
@@ -435,8 +443,7 @@ class Trainer:
         
         for batch in self.val_loader:
             # 移动数据到设备
-            batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
-                    for k, v in batch.items()}
+            batch = self._move_to_device(batch)
             
             # 前向传播
             outputs = self.model(batch)
