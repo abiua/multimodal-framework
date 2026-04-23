@@ -12,5 +12,6 @@ from . import audio_models
 from . import text_models
 from . import video_models
 from . import wave_models
+from . import unireplknet_models
 
 __all__ = ['ModelZoo', 'register_backbone']

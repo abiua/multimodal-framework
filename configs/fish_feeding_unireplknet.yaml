@@ -1,0 +1,152 @@
+# ----------------------------------------------------------------------------
+# Fish Feeding - UniRepLKNet + 单次中期融合
+# 不启用多阶段特征融合，只做：
+# image/audio/wave 三模态 UniRepLKNet 特征提取 + attention mid fusion + classifier
+# ----------------------------------------------------------------------------
+
+data:
+  batch_size: 32
+  num_workers: 4
+  pin_memory: true
+
+  train_path: "data/fish_feeding_local/train"
+  val_path: "data/fish_feeding_local/val"
+  test_path: "data/fish_feeding_local/test"
+
+  modalities:
+    - image
+    - audio
+    - wave
+
+  loaders:
+    image:
+      type: image_loader
+      extra_params:
+        image_size: 224
+
+    audio:
+      type: audio_loader_stereo
+      extra_params:
+        sample_rate: 16000
+        max_length: 160000
+        n_mels: 224
+        time_steps: 224
+        n_fft: 1024
+
+    wave:
+      type: wave_loader
+      extra_params:
+        max_length: 512
+        num_features: 6
+        normalize: true
+
+  image_size: 224
+
+classes:
+  num_classes: 3
+  class_names:
+    - None
+    - Strong
+    - Weak
+
+model:
+  backbones:
+    image:
+      type: unireplknet_image
+      pretrained: true
+      feature_dim: 512
+      freeze: false
+      extra_params:
+        variant: p
+        attempt_use_lk_impl: false
+        drop_path_rate: 0.0
+        with_cp: false
+
+    audio:
+      type: unireplknet_audio
+      pretrained: false
+      feature_dim: 512
+      freeze: false
+      extra_params:
+        variant: p
+        audio_channels: 2
+        attempt_use_lk_impl: false
+        drop_path_rate: 0.0
+        with_cp: false
+
+    wave:
+      type: unireplknet_wave
+      pretrained: false
+      feature_dim: 512
+      freeze: false
+      extra_params:
+        variant: p
+        seq_len: 512
+        in_channels: 6
+        image_size: 224
+        adapter_channels: 64
+        attempt_use_lk_impl: false
+        drop_path_rate: 0.0
+        with_cp: false
+
+  # 单次中期融合
+  mid_fusion_enabled: true
+  fusion_type: attention
+  fusion_hidden_dim: 512
+
+  # 明确关闭 staged forward / multi-stage fusion
+  use_staged_forward: false
+  fusion_stages: []
+
+  dropout_rate: 0.1
+  classifier_hidden_dims: [256]
+
+train:
+  epochs: 100
+  learning_rate: 0.0003
+  weight_decay: 0.0001
+  lr_scheduler: cosine
+  warmup_epochs: 5
+  optimizer: adamw
+  label_smoothing: 0.1
+
+  early_stop:
+    enabled: true
+    patience: 25
+    min_delta: 0.001
+    monitor: accuracy
+    mode: max
+
+  val_interval: 5
+
+eval:
+  metrics:
+    - accuracy
+    - precision
+    - recall
+    - f1
+  save_predictions: true
+  confusion_matrix: true
+
+system:
+  seed: 42
+
+  gpu_ids:
+    - 0
+    - 1
+    - 2
+    - 3
+
+  distributed: false
+  fp16: false
+  log_interval: 20
+  save_interval: 10
+
+  output_dir: output/fish_feeding_unireplknet_midfusion
+  resume: ""
+
+  dist_backend: nccl
+  dist_url: env://
+
+  tensorboard_enabled: true
+  experiment_name: "fish_feeding_unireplknet_midfusion"
