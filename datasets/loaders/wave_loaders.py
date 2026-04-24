@@ -47,6 +47,8 @@ class WaveLoader(BaseLoader):
 
     def transform(self, data: np.ndarray) -> Dict[str, torch.Tensor]:
         """转换数据为模型输入格式"""
+        data = np.asarray(data, dtype=np.float32)
+        data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
         if data.ndim == 1:
             data = data.reshape(-1, 1)
 
@@ -67,7 +69,7 @@ class WaveLoader(BaseLoader):
             std = np.std(data, axis=0, keepdims=True)
             std[std == 0] = 1
             data = (data - mean) / std
-
+        data = np.nan_to_num(data, nan=0.0, posinf=0.0, neginf=0.0)
         attention_mask = np.ones(self.max_length)
         return {
             'wave': torch.tensor(data, dtype=torch.float32)

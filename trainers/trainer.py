@@ -164,21 +164,76 @@ class Trainer:
             )
         else:
             raise ValueError(f"不支持的优化器: {self.config.train.optimizer}")
+        
+    def _handle_non_finite_grads(self, batch, batch_idx) -> bool:
+        """检查非有限梯度；DDP 下任意 rank 出现异常，所有 rank 一起跳过该 batch。"""
+        model_to_check = self.model.module if self.distributed else self.model
+
+        bad_names = []
+        for name, param in model_to_check.named_parameters():
+            if param.grad is None:
+                continue
+            if not torch.isfinite(param.grad).all():
+                bad_names.append(name)
+
+        local_bad = 1 if bad_names else 0
+        bad_flag = torch.tensor([local_bad], device=self.device, dtype=torch.int)
+
+        if self.distributed:
+            dist.all_reduce(bad_flag, op=dist.ReduceOp.MAX)
+
+        if bad_flag.item() > 0:
+            sample_ids = batch.get('sample_id', None)
+            class_names = batch.get('class_name', None)
+
+            print(
+                f"[rank{get_rank()}] Skip non-finite grad batch: "
+                f"epoch={self.current_epoch}, batch_idx={batch_idx}, "
+                f"local_bad_layers={bad_names[:20]}, "
+                f"sample_ids={sample_ids}, class_names={class_names}",
+                flush=True
+            )
+
+            self.optimizer.zero_grad(set_to_none=True)
+            return True
+
+        return False    
     
     def _build_lr_scheduler(self):
         """构建学习率调度器"""
         if self.config.train.lr_scheduler == 'cosine':
-            return optim.lr_scheduler.CosineAnnealingLR(
+            warmup_epochs = int(getattr(self.config.train, 'warmup_epochs', 0))
+            total_epochs = int(self.config.train.epochs)
+            base_lr = float(self.config.train.learning_rate)
+
+            cosine = optim.lr_scheduler.CosineAnnealingLR(
                 self.optimizer,
-                T_max=self.config.train.epochs,
-                eta_min=self.config.train.learning_rate * 0.01
+                T_max=max(total_epochs - warmup_epochs, 1),
+                eta_min=base_lr * 0.01
             )
+
+            if warmup_epochs > 0:
+                warmup = optim.lr_scheduler.LinearLR(
+                    self.optimizer,
+                    start_factor=0.1,
+                    end_factor=1.0,
+                    total_iters=warmup_epochs
+                )
+                return optim.lr_scheduler.SequentialLR(
+                    self.optimizer,
+                    schedulers=[warmup, cosine],
+                    milestones=[warmup_epochs]
+                )
+
+            return cosine
+
         elif self.config.train.lr_scheduler == 'step':
             return optim.lr_scheduler.StepLR(
                 self.optimizer,
                 step_size=self.config.train.step_size,
                 gamma=self.config.train.gamma
             )
+
         elif self.config.train.lr_scheduler == 'plateau':
             return optim.lr_scheduler.ReduceLROnPlateau(
                 self.optimizer,
@@ -186,6 +241,7 @@ class Trainer:
                 factor=self.config.train.gamma,
                 patience=10
             )
+
         else:
             return None
     
@@ -322,30 +378,28 @@ class Trainer:
 
             if self.config.system.fp16 and self.scaler is not None:
                 self.scaler.scale(loss).backward()
-
-                # 反缩放后再裁剪梯度
                 self.scaler.unscale_(self.optimizer)
-                grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
 
-                # 再检查梯度是否正常
-                if not torch.isfinite(torch.as_tensor(grad_norm, device=self.device)):
-                    raise ValueError(
-                        f"Non-finite grad norm detected at epoch={self.current_epoch}, "
-                        f"batch_idx={batch_idx}, grad_norm={grad_norm}"
-                    )
+                if self._handle_non_finite_grads(batch, batch_idx):
+                    continue
+
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(),
+                    max_norm=1.0
+                )
 
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
             else:
                 loss.backward()
 
-                grad_norm = torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                if self._handle_non_finite_grads(batch, batch_idx):
+                    continue
 
-                if not torch.isfinite(torch.as_tensor(grad_norm, device=self.device)):
-                    raise ValueError(
-                        f"Non-finite grad norm detected at epoch={self.current_epoch}, "
-                        f"batch_idx={batch_idx}, grad_norm={grad_norm}"
-                    )
+                grad_norm = torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(),
+                    max_norm=1.0
+                )
 
                 self.optimizer.step()
 

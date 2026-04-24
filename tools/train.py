@@ -132,12 +132,11 @@ def main_worker(rank, world_size, args, config):
     if config.system.resume:
         trainer.load_checkpoint(config.system.resume)
     
-    # 开始训练
-    trainer.train()
-    
-    # 清理分布式环境
-    if args.distributed:
-        cleanup_distributed()
+    try:
+        trainer.train()
+    finally:
+        if args.distributed:
+            cleanup_distributed()
 
 
 def main():
