@@ -28,7 +28,7 @@ class BaseBackbone(nn.Module):
         """完整前向传播，返回 [B, feature_dim] 特征向量。"""
         raise NotImplementedError
 
-    def tokenize(self, *args, **inputs) -> Dict[str, torch.Tensor]:
+    def tokenize(self, x=None, **inputs) -> Dict[str, Any]:
         """可选的 token 化输出。
 
         默认实现：调用 forward() 得到 [B, D]，包装为单 token [B, 1, D]。
@@ -39,9 +39,8 @@ class BaseBackbone(nn.Module):
                 "tokens": Tensor [B, N, D] — token 序列
                 "layout": str — "1d" (temporal) | "2d" (spatial) | "scalar" (single)
         """
-        x = inputs.pop('x', None)
         if x is not None:
-            inputs.setdefault('x', x)
+            inputs['x'] = x
         feat = self.forward(**inputs)  # [B, D]
         return {"tokens": feat.unsqueeze(1), "layout": "scalar"}  # [B, 1, D]
 
