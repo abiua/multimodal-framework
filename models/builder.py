@@ -361,6 +361,10 @@ class ModelBuilder:
 
     @classmethod
     def build_model(cls, config) -> MultimodalClassifier:
+        # 新流水线路由
+        if getattr(config.model, "unified_pipeline", None) is not None:
+            return cls.build_pipeline_v2(config)
+
         if not hasattr(config.model, "backbones") or not config.model.backbones:
             raise ValueError("config.model.backbones 字段不能为空")
 
@@ -417,4 +421,107 @@ class ModelBuilder:
             fusion=fusion,
             use_staged_forward=getattr(config.model, "use_staged_forward", False),
             fusion_stages=getattr(config.model, "fusion_stages", ()),
+        )
+
+    @classmethod
+    def build_pipeline_v2(cls, config) -> "MultimodalPipelineV2":
+        from .pipeline_v2 import MultimodalPipelineV2
+        from .tokenizer import MultiModalTokenizer
+        from .interaction import InteractionBlock
+        from .decision import DecisionRegistry
+        from .heads import MultimodalFusion
+
+        pipe_cfg = config.model.unified_pipeline
+        modalities = list(config.data.modalities)
+
+        # 1. Stems: 复用现有 build_backbone
+        stems = {}
+        feature_dims = {}
+        for m in modalities:
+            if m not in config.model.backbones:
+                raise ValueError(f"模态 '{m}' 在 model.backbones 中未定义")
+            b_cfg = config.model.backbones[m]
+            backbone = cls.build_backbone(
+                backbone_type=b_cfg.type,
+                feature_dim=b_cfg.feature_dim,
+                pretrained=getattr(b_cfg, "pretrained", True),
+                dropout_rate=config.model.dropout_rate,
+                extra_params=getattr(b_cfg, "extra_params", {}),
+            )
+            if getattr(b_cfg, "freeze", False):
+                for p in backbone.parameters():
+                    p.requires_grad = False
+            stems[m] = backbone
+            feature_dims[m] = b_cfg.feature_dim
+
+        # 2. Tokenizer
+        token_dim = pipe_cfg.token_dim
+        pe_cfgs = getattr(pipe_cfg, "position_encodings", None)
+        pe_cfgs = dict(pe_cfgs) if pe_cfgs else None
+        tokenizer = MultiModalTokenizer(
+            feature_dims=feature_dims,
+            unified_dim=token_dim,
+            modalities=modalities,
+            pe_configs=pe_cfgs,
+        )
+
+        # 3. Interaction Blocks
+        import torch.nn as nn
+        interaction_blocks = nn.ModuleList()
+        for blk_cfg in pipe_cfg.interaction_blocks:
+            block = InteractionBlock(
+                modalities=modalities,
+                dim=token_dim,
+                transform_type=getattr(blk_cfg, "transform_type", "transformer"),
+                transform_kwargs=dict(getattr(blk_cfg, "transform_kwargs", {})),
+                fusion_type=blk_cfg.fusion_type,
+                fusion_kwargs=dict(getattr(blk_cfg, "fusion_kwargs", {})),
+            )
+            interaction_blocks.append(block)
+
+        # 4. Mid Fusion
+        mid_fusion_enabled = getattr(pipe_cfg, "mid_fusion_enabled", True)
+        mid_fusion_out_dim = pipe_cfg.mid_fusion_output_dim
+
+        if len(modalities) > 1 and mid_fusion_enabled:
+            mid_fusion = cls.build_fusion(
+                feature_dims=[token_dim] * len(modalities),
+                output_dim=mid_fusion_out_dim,
+                fusion_type=pipe_cfg.mid_fusion_type,
+                dropout_rate=config.model.dropout_rate,
+            )
+        else:
+            mid_fusion = None
+            if len(modalities) > 1:
+                mid_fusion_out_dim = token_dim * len(modalities)
+
+        # 5. Decision
+        decision_cfg = getattr(pipe_cfg, "decision", None)
+        if decision_cfg is not None:
+            decision = DecisionRegistry.create(
+                name=decision_cfg.type,
+                in_dim=mid_fusion_out_dim,
+                **(dict(getattr(decision_cfg, "extra_params", {}))),
+            )
+        else:
+            decision = DecisionRegistry.create("identity", in_dim=mid_fusion_out_dim)
+
+        # Determine decision output dim
+        try:
+            test_in = torch.randn(1, mid_fusion_out_dim)
+            test_out, _ = decision(test_in)
+            decision_out_dim = test_out.shape[-1]
+        except Exception:
+            decision_out_dim = mid_fusion_out_dim
+
+        return MultimodalPipelineV2(
+            stems=stems,
+            tokenizer=tokenizer,
+            interaction_blocks=interaction_blocks,
+            mid_fusion=mid_fusion,
+            mid_fusion_output_dim=mid_fusion_out_dim,
+            decision=decision,
+            decision_output_dim=decision_out_dim,
+            num_classes=config.classes.num_classes,
+            dropout_rate=config.model.dropout_rate,
         )
