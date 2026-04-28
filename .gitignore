@@ -2,3 +2,5 @@
 /output/
 /.history/
 /.vscode/
+__pycache__/
+*.pyc

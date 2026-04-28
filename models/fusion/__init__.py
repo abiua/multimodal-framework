@@ -1,7 +1,6 @@
 # models/fusion/__init__.py
-from .registry import FusionRegistry, BaseFusion
+from .registry import FusionRegistry, BaseFusion, IdentityFusion
 from .strategies import (
-    IdentityFusion,
     GateInjectionFusion,
     CrossAttentionFusion,
     TokenMixerFusion,

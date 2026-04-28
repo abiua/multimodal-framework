@@ -1,9 +1,7 @@
 # models/fusion/strategies.py
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-
-from .registry import BaseFusion, FusionRegistry, IdentityFusion
+from .registry import BaseFusion, FusionRegistry
 
 
 @FusionRegistry.register("gate")
