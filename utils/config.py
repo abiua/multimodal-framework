@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional
@@ -14,6 +16,7 @@ DEFAULT_MODALITY_LOADERS = {
 
 ALLOWED_FUSION_TYPES = {"concat", "add", "attention"}
 ALLOWED_STAGE_FUSION_MODES = {"identity", "mean", "sum"}
+ALLOWED_MID_FUSION_TYPES_V2 = {"concat", "add", "attention", "none"}
 
 
 @dataclass
@@ -80,6 +83,44 @@ class ModelConfig:
     fusion_stages: List[int] = field(default_factory=list)  # 0-based
     stage_fusion_common_dim: int = 128
     stage_fusion_mode: str = "identity"
+
+    # 新统一流水线（为 None 时走旧路径）
+    unified_pipeline: Optional[UnifiedPipelineConfig] = None
+
+
+@dataclass
+class InteractionBlockConfig:
+    """单个 InteractionBlock 配置"""
+    transform_type: str = "transformer"
+    transform_kwargs: Dict[str, Any] = field(default_factory=dict)
+    fusion_type: str = "none"
+    fusion_kwargs: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class DecisionConfig:
+    """Decision 模块配置"""
+    type: str = "identity"
+    extra_params: Dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
+class PEResolutionConfig:
+    """Position Encoding 按模态配置"""
+    enabled: bool = True
+    max_len: int = 256
+
+
+@dataclass
+class UnifiedPipelineConfig:
+    """统一多模态流水线配置（新）"""
+    token_dim: int = 256
+    interaction_blocks: List[InteractionBlockConfig] = field(default_factory=list)
+    position_encodings: Dict[str, PEResolutionConfig] = field(default_factory=dict)
+    mid_fusion_type: str = "attention"
+    mid_fusion_output_dim: int = 256
+    mid_fusion_enabled: bool = True
+    decision: DecisionConfig = field(default_factory=DecisionConfig)
 
 
 @dataclass
@@ -286,6 +327,27 @@ def validate_config(cfg: DictConfig) -> None:
             raise ValueError(
                 "当 model.use_staged_forward=False 时，model.fusion_stages 应为空"
             )
+
+    # ---------------------------
+    # unified pipeline v2
+    # ---------------------------
+    if cfg.model.unified_pipeline is not None:
+        pipe = cfg.model.unified_pipeline
+        _require_positive_int("unified_pipeline.token_dim", int(pipe.token_dim))
+        _require_positive_int("unified_pipeline.mid_fusion_output_dim", int(pipe.mid_fusion_output_dim))
+
+        if pipe.mid_fusion_type not in ALLOWED_MID_FUSION_TYPES_V2:
+            raise ValueError(
+                f"unified_pipeline.mid_fusion_type 必须是 {sorted(ALLOWED_MID_FUSION_TYPES_V2)} 之一"
+            )
+
+        from models.fusion.registry import FusionRegistry as _FR
+        for i, blk in enumerate(pipe.interaction_blocks):
+            if blk.fusion_type not in _FR.list_all():
+                raise ValueError(
+                    f"interaction_blocks[{i}].fusion_type '{blk.fusion_type}' 无效，"
+                    f"可用: {_FR.list_all()}"
+                )
 
     # ---------------------------
     # train
