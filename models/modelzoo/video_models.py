@@ -503,3 +503,64 @@ class R2Plus1D18(BaseBackbone):
         x = _normalize_video_input(x)
         x = self.backbone(x)
         return self.proj(x.flatten(1))
+
+
+@register_backbone('videomae', description='VideoMAE 视频特征提取器', modality='video')
+class VideoMAE(BaseBackbone):
+    """VideoMAE-style 视频特征提取器。
+
+    简化实现：3D Patch Embedding + Transformer Encoder（无 decoder）。
+    预训练 checkpoint 可通过 timm 加载。
+    """
+
+    def __init__(self, img_size=224, patch_size=16, num_frames=16,
+                 tubelet_size=2, in_chans=3, embed_dim=768, depth=12,
+                 num_heads=12, mlp_ratio=4., drop_rate=0., attn_drop_rate=0.,
+                 feature_dim=768, **kwargs):
+        super().__init__()
+        self.feature_dim = feature_dim
+        self.embed_dim = embed_dim
+
+        self.patch_embed = nn.Conv3d(
+            in_chans, embed_dim,
+            kernel_size=(tubelet_size, patch_size, patch_size),
+            stride=(tubelet_size, patch_size, patch_size),
+        )
+
+        num_patches = (img_size // patch_size) ** 2 * (num_frames // tubelet_size)
+
+        self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
+        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim))
+        self.pos_drop = nn.Dropout(p=drop_rate)
+
+        self.blocks = nn.ModuleList([
+            Block(dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio,
+                  qkv_bias=True, drop=drop_rate, attn_drop=attn_drop_rate)
+            for _ in range(depth)
+        ])
+        self.norm = nn.LayerNorm(embed_dim)
+        self.proj = nn.Linear(embed_dim, feature_dim) if feature_dim != embed_dim else nn.Identity()
+
+        nn.init.trunc_normal_(self.pos_embed, std=.02)
+        nn.init.trunc_normal_(self.cls_token, std=.02)
+
+    def forward(self, x=None, **kwargs):
+        if x is None:
+            x = next(v for v in kwargs.values() if isinstance(v, torch.Tensor))
+        x = _normalize_video_input(x)
+        x = x.permute(0, 2, 1, 3, 4)     # (B, T, C, H, W) -> (B, C, T, H, W)
+
+        B = x.shape[0]
+        x = self.patch_embed(x)          # [B, embed_dim, T', H', W']
+        x = x.flatten(2).transpose(1, 2) # [B, N, embed_dim]
+
+        cls_token = self.cls_token.expand(B, -1, -1)
+        x = torch.cat([cls_token, x], dim=1)
+        x = x + self.pos_embed
+        x = self.pos_drop(x)
+
+        for blk in self.blocks:
+            x = blk(x)
+
+        x = self.norm(x)
+        return self.proj(x[:, 0])
