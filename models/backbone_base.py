@@ -10,7 +10,7 @@ State 布局约定（StageFusionAdapter 依赖）:
     text:        dict {"x": [B, L, C], "attention_mask": [B, L]}
 """
 
-from typing import Any, List
+from typing import Any, Dict, List
 import torch
 import torch.nn as nn
 
@@ -27,6 +27,23 @@ class BaseBackbone(nn.Module):
     def forward(self, *args, **inputs) -> torch.Tensor:
         """完整前向传播，返回 [B, feature_dim] 特征向量。"""
         raise NotImplementedError
+
+    def tokenize(self, *args, **inputs) -> Dict[str, torch.Tensor]:
+        """可选的 token 化输出。
+
+        默认实现：调用 forward() 得到 [B, D]，包装为单 token [B, 1, D]。
+        子类可重写以输出更丰富的 token 序列（如 feature map flatten）。
+
+        Returns:
+            Dict with keys:
+                "tokens": Tensor [B, N, D] — token 序列
+                "layout": str — "1d" (temporal) | "2d" (spatial) | "scalar" (single)
+        """
+        x = inputs.pop('x', None)
+        if x is not None:
+            inputs.setdefault('x', x)
+        feat = self.forward(**inputs)  # [B, D]
+        return {"tokens": feat.unsqueeze(1), "layout": "scalar"}  # [B, 1, D]
 
 
 class StageableBackbone(BaseBackbone):
