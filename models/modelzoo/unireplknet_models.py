@@ -19,6 +19,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from ..registry import register_backbone
+from ..backbone_base import StageableBackbone
 from .UniRepLKNet.unireplknet import (
     unireplknet_a,
     unireplknet_f,
@@ -189,7 +190,7 @@ def _create_unireplknet(
     return model
 
 
-class _UniRepLKNetBase(nn.Module):
+class _UniRepLKNetBase(StageableBackbone):
     num_stages = 4
 
     def __init__(

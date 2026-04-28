@@ -4,28 +4,7 @@ from typing import Dict, List, Optional, Any
 
 from .registry import ModelZoo
 from .heads import ClassifierHead, MultimodalFusion
-
-
-class StageableBackbone(nn.Module):
-    num_stages = 4
-
-    def init_state(self, **inputs):
-        """把原始输入转成后续逐 stage 传播的 state"""
-        raise NotImplementedError
-
-    def forward_stage(self, state, stage_idx: int):
-        """只执行一个 stage，返回新的 state"""
-        raise NotImplementedError
-
-    def forward_head(self, state):
-        """stage 全跑完后，做 pool/proj，输出最终特征向量"""
-        raise NotImplementedError
-
-    def forward(self, **inputs):
-        state = self.init_state(**inputs)
-        for stage_idx in range(self.num_stages):
-            state = self.forward_stage(state, stage_idx)
-        return self.forward_head(state)
+from .backbone_base import StageableBackbone
 
 
 class StageFusionAdapter(nn.Module):
@@ -177,14 +156,10 @@ class MultimodalClassifier(nn.Module):
         if self.use_staged_forward:
             stage_counts = []
             for modality, backbone in self.backbones.items():
-                for attr in ("init_state", "forward_stage", "forward_head"):
-                    if not hasattr(backbone, attr):
-                        raise TypeError(
-                            f"模态 '{modality}' 的 backbone 不支持 staged forward，缺少方法: {attr}"
-                        )
-                if not hasattr(backbone, "num_stages"):
+                if not isinstance(backbone, StageableBackbone):
                     raise TypeError(
-                        f"模态 '{modality}' 的 backbone 不支持 staged forward，缺少属性: num_stages"
+                        f"模态 '{modality}' 的 backbone 不支持 staged forward: "
+                        f"{type(backbone).__name__} 未继承 StageableBackbone"
                     )
                 stage_counts.append(int(backbone.num_stages))
 

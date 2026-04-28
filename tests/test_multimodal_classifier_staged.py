@@ -3,14 +3,15 @@ import torch
 import torch.nn as nn
 
 from models.builder import MultimodalClassifier
+from models.backbone_base import StageableBackbone
 
 
-class ToyStageableBackbone(nn.Module):
+class ToyStageableBackbone(StageableBackbone):
     num_stages = 4
-    stage_dims = [4, 4, 4, 4]
 
     def __init__(self, feature_dim=4):
         super().__init__()
+        self.stage_dims = [4, 4, 4, 4]
         self.feature_dim = feature_dim
         self.stage_calls = []
 
