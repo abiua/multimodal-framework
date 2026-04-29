@@ -1,14 +1,14 @@
-# configs/test_imu_freq_5hz.yaml
-# 5Hz IMU采样率测试配置
+# configs/finetune_head.yaml
+# 微调分类头：3分类 → 4分类
 
 data:
   batch_size: 16
   num_workers: 4
   pin_memory: true
 
-  train_path: "data/multimodal_freq_split/5hz"
-  val_path: "data/multimodal_freq_split/5hz"
-  test_path: "data/multimodal_freq_split/5hz"
+  train_path: "data/finetune_train"
+  val_path: "data/finetune_test"
+  test_path: "data/finetune_test"
 
   modalities:
     - image
@@ -29,7 +29,7 @@ data:
     wave:
       type: wave_loader
       extra_params:
-        max_length: 12
+        max_length: 512
         num_features: 6
         normalize: true
 
@@ -61,35 +61,28 @@ model:
 
   unified_pipeline:
     token_dim: 256
-
     position_encodings:
       image: { enabled: true, max_len: 256 }
       audio: { enabled: true, max_len: 256 }
       wave:  { enabled: true, max_len: 512 }
-
     interaction_blocks:
       - transform_type: transformer
         transform_kwargs: { num_heads: 8, mlp_ratio: 4.0, dropout: 0.1 }
         fusion_type: none
-
       - transform_type: transformer
         transform_kwargs: { num_heads: 8, mlp_ratio: 4.0, dropout: 0.1 }
         fusion_type: gate
         fusion_kwargs: { gate_hidden_dim: 128, dropout: 0.1 }
-
       - transform_type: transformer
         transform_kwargs: { num_heads: 8, mlp_ratio: 4.0, dropout: 0.1 }
         fusion_type: cross_attn
         fusion_kwargs: { num_heads: 4, dropout: 0.1 }
-
       - transform_type: transformer
         transform_kwargs: { num_heads: 8, mlp_ratio: 4.0, dropout: 0.1 }
         fusion_type: token_mix
         fusion_kwargs: { num_heads: 8, dropout: 0.1 }
-
     mid_fusion_type: attention
     mid_fusion_output_dim: 256
-
     decision:
       type: identity
       extra_params: {}
@@ -119,6 +112,6 @@ system:
   fp16: false
   log_interval: 10
   save_interval: 50
-  output_dir: output/test_5hz
+  output_dir: output/finetune_head
   tensorboard_enabled: false
-  experiment_name: test_5hz
+  experiment_name: finetune_head

@@ -37,7 +37,7 @@ data:
 
 classes:
   num_classes: 4
-  class_names: ["class_1", "class_2", "class_3", "class_4"]
+  class_names: ["1", "2", "3", "4"]
 
 model:
   backbones:
@@ -65,7 +65,7 @@ model:
     position_encodings:
       image: { enabled: true, max_len: 256 }
       audio: { enabled: true, max_len: 256 }
-      wave:  { enabled: true, max_len: 24 }
+      wave:  { enabled: true, max_len: 512 }
 
     interaction_blocks:
       - transform_type: transformer
