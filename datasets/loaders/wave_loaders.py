@@ -23,27 +23,26 @@ class WaveLoader(BaseLoader):
         self.normalize = normalize
 
     def load(self, path: str) -> np.ndarray:
-        """加载CSV文件"""
-        try:
-            data = np.loadtxt(path, delimiter=',', skiprows=1)
-        except:
-            try:
-                import pandas as pd
-                df = pd.read_csv(path)
-                data = df.values
-            except:
-                with open(path, 'r') as f:
-                    lines = f.readlines()
-                    data = []
-                    for line in lines[1:]:
-                        try:
-                            row = [float(x) for x in line.strip().split(',')]
-                            data.append(row)
-                        except:
-                            continue
-                    data = np.array(data)
+        """加载CSV文件 - 兼容IMU CSV格式（中文表头、时间字符串、多列）"""
+        import csv
+        rows = []
+        with open(path, encoding='utf-8-sig', newline='') as f:
+            reader = csv.reader(f, skipinitialspace=True)
+            for row in reader:
+                if row:
+                    rows.append(row)
 
-        return data
+        # 提取六轴数据列 (加速度X/Y/Z + 角速度X/Y/Z)
+        # 第4到第9列 (0-based index 3-8)，跳过时间、设备名、片上时间
+        data = []
+        for row in rows[1:]:
+            try:
+                vals = [float(row[i]) for i in range(3, min(9, len(row)))]
+                data.append(vals)
+            except (ValueError, IndexError):
+                continue
+
+        return np.array(data, dtype=np.float32)
 
     def transform(self, data: np.ndarray) -> Dict[str, torch.Tensor]:
         """转换数据为模型输入格式"""
