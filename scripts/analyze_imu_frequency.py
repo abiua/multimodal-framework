@@ -156,7 +156,8 @@ def main():
         print(f"\n--- {freq.upper()} ({len(feats_list)} 片段) ---")
         print(f"  平均采样点数: {np.mean([f['n_samples'] for f in feats_list]):.1f}")
 
-        for metric in ['accel_std', 'accel_rms', 'gyro_std', 'gyro_rms']:
+        for metric in ['accel_std', 'accel_rms', 'accel_range', 'accel_energy',
+                       'gyro_std', 'gyro_rms', 'gyro_range', 'gyro_energy']:
             vals = np.array([np.mean(f[metric]) for f in feats_list if metric in f])
             if len(vals):
                 print(f"  {metric}: mean={np.mean(vals):.4f}, std={np.std(vals):.4f}, "
@@ -189,6 +190,26 @@ def main():
                 accel_peaks.append(np.max(f['accel_range']))
         print(f"{freq}: 加速度最大峰峰值 = {np.mean(accel_peaks):.4f}g "
               f"(范围: {np.min(accel_peaks):.4f} - {np.max(accel_peaks):.4f})")
+
+    # 保存文本报告
+    output_dir = Path(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    report_path = output_dir / 'frequency_analysis.txt'
+    with open(report_path, 'w') as f:
+        f.write("IMU频率影响分析报告\n")
+        f.write("=" * 70 + "\n")
+        for freq in freq_order:
+            feats_list = freq_features[freq]
+            if not feats_list:
+                continue
+            f.write(f"\n{freq.upper()} ({len(feats_list)} 片段)\n")
+            f.write(f"  平均采样点数: {np.mean([x['n_samples'] for x in feats_list]):.1f}\n")
+            for metric in ['accel_std', 'accel_rms', 'accel_range', 'accel_energy',
+                           'gyro_std', 'gyro_rms', 'gyro_range', 'gyro_energy']:
+                vals = np.array([np.mean(x[metric]) for x in feats_list if metric in x])
+                if len(vals):
+                    f.write(f"  {metric}: mean={np.mean(vals):.4f} ± {np.std(vals):.4f}\n")
+    print(f"\n报告已保存到 {report_path}")
 
     print("\n分析完成。")
 
