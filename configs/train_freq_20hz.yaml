@@ -1,0 +1,137 @@
+data:
+  batch_size: 4
+  num_workers: 2
+  pin_memory: true
+  train_path: data/freq_train_20hz
+  val_path: data/freq_test_20hz
+  test_path: data/freq_test_20hz
+  modalities:
+  - image
+  - audio
+  - wave
+  loaders:
+    image:
+      type: image_loader
+      extra_params: {}
+    audio:
+      type: audio_loader_stereo
+      extra_params:
+        sample_rate: 16000
+        max_length: 160000
+        n_mels: 224
+        time_steps: 224
+    wave:
+      type: wave_loader
+      extra_params:
+        max_length: 48
+        num_features: 6
+        normalize: true
+  image_size: 224
+classes:
+  num_classes: 4
+  class_names:
+  - '1'
+  - '2'
+  - '3'
+  - '4'
+model:
+  backbones:
+    image:
+      type: resnet18
+      feature_dim: 512
+      pretrained: true
+      freeze: false
+    audio:
+      type: audiocnn
+      feature_dim: 512
+      pretrained: false
+      freeze: false
+      extra_params:
+        in_channels: 2
+    wave:
+      type: tcn
+      feature_dim: 256
+      pretrained: false
+      freeze: false
+  unified_pipeline:
+    token_dim: 256
+    position_encodings:
+      image:
+        enabled: true
+        max_len: 256
+      audio:
+        enabled: true
+        max_len: 256
+      wave:
+        enabled: true
+        max_len: 512
+    interaction_blocks:
+    - transform_type: transformer
+      transform_kwargs:
+        num_heads: 8
+        mlp_ratio: 4.0
+        dropout: 0.1
+      fusion_type: none
+    - transform_type: transformer
+      transform_kwargs:
+        num_heads: 8
+        mlp_ratio: 4.0
+        dropout: 0.1
+      fusion_type: gate
+      fusion_kwargs:
+        gate_hidden_dim: 128
+        dropout: 0.1
+    - transform_type: transformer
+      transform_kwargs:
+        num_heads: 8
+        mlp_ratio: 4.0
+        dropout: 0.1
+      fusion_type: cross_attn
+      fusion_kwargs:
+        num_heads: 4
+        dropout: 0.1
+    - transform_type: transformer
+      transform_kwargs:
+        num_heads: 8
+        mlp_ratio: 4.0
+        dropout: 0.1
+      fusion_type: token_mix
+      fusion_kwargs:
+        num_heads: 8
+        dropout: 0.1
+    mid_fusion_type: attention
+    mid_fusion_output_dim: 256
+    decision:
+      type: identity
+      extra_params: {}
+  dropout_rate: 0.35
+train:
+  epochs: 1
+  learning_rate: 5.0e-05
+  weight_decay: 0.001
+  lr_scheduler: cosine
+  warmup_epochs: 0
+  optimizer: adamw
+  label_smoothing: 0.0
+  early_stop:
+    enabled: false
+  val_interval: 1
+eval:
+  metrics:
+  - accuracy
+  - precision
+  - recall
+  - f1
+  save_predictions: true
+  confusion_matrix: true
+system:
+  seed: 42
+  gpu_ids:
+  - 0
+  distributed: false
+  fp16: false
+  log_interval: 10
+  save_interval: 10
+  output_dir: output/train_20hz
+  tensorboard_enabled: false
+  experiment_name: train_20hz
