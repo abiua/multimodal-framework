@@ -121,6 +121,9 @@ class UnifiedPipelineConfig:
     mid_fusion_output_dim: int = 256
     mid_fusion_enabled: bool = True
     decision: DecisionConfig = field(default_factory=DecisionConfig)
+    # 模态平衡 (V2.1)
+    modality_dropout: float = 0.0
+    aux_classifiers: bool = True
 
 
 @dataclass

@@ -43,13 +43,23 @@ class Evaluator:
         all_labels = []
         all_probs = []
         
+        def _move_to_device(obj):
+            if isinstance(obj, torch.Tensor):
+                return obj.to(self.device)
+            if isinstance(obj, dict):
+                return {k: _move_to_device(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [_move_to_device(v) for v in obj]
+            return obj
+
         for batch in self.test_loader:
             # 移动数据到设备
-            batch = {k: v.to(self.device) if isinstance(v, torch.Tensor) else v 
-                    for k, v in batch.items()}
+            batch = {k: _move_to_device(v) for k, v in batch.items()}
             
-            # 前向传播
+            # 前向传播（兼容 (logits, aux_logits) 新格式）
             outputs = self.model(batch)
+            if isinstance(outputs, tuple):
+                outputs = outputs[0]  # 取 fusion logits
             probs = torch.softmax(outputs, dim=1)
             _, predicted = outputs.max(1)
             

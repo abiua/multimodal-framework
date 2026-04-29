@@ -514,6 +514,10 @@ class ModelBuilder:
         except Exception:
             decision_out_dim = mid_fusion_out_dim
 
+        # 模态平衡参数
+        mod_dropout = getattr(pipe_cfg, "modality_dropout", 0.0)
+        aux_heads = getattr(pipe_cfg, "aux_classifiers", True)
+
         return MultimodalPipelineV2(
             stems=stems,
             tokenizer=tokenizer,
@@ -524,4 +528,6 @@ class ModelBuilder:
             decision_output_dim=decision_out_dim,
             num_classes=config.classes.num_classes,
             dropout_rate=config.model.dropout_rate,
+            modality_dropout=mod_dropout,
+            aux_classifiers=aux_heads,
         )

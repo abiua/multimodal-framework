@@ -1,13 +1,15 @@
-"""MultimodalPipelineV2 -- 新多模态流水线。
+"""MultimodalPipelineV2 — 新多模态流水线。
 
 Flow:
     Input -> Stem(各模态独立) -> Tokenization -> InteractionBlocks
         -> Per-Modal Pooling -> Mid Fusion -> Decision -> Classifier -> logits
 
 Config 驱动，所有组件可插拔。
+
+V2.1: 模态Dropout + 辅助分类头，防止强模态压制弱模态。
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import torch
 import torch.nn as nn
 
@@ -20,7 +22,9 @@ from .decision import DecisionRegistry, BaseDecision
 class MultimodalPipelineV2(nn.Module):
     """新多模态流水线模型。
 
-    Config 示例见 configs/default_multimodal_v2.yaml。
+    V2.1 新增:
+        - 模态 Dropout: 训练时随机屏蔽模态，防止强模态压制
+        - 辅助分类头: 每模态独立分类头，确保 encoder 学到判别特征
     """
 
     def __init__(
@@ -40,6 +44,9 @@ class MultimodalPipelineV2(nn.Module):
         # Classifier
         num_classes: int,
         dropout_rate: float = 0.1,
+        # 模态平衡
+        modality_dropout: float = 0.0,
+        aux_classifiers: bool = True,
     ):
         super().__init__()
         self.stems = nn.ModuleDict(stems)
@@ -47,11 +54,24 @@ class MultimodalPipelineV2(nn.Module):
         self.interaction_blocks = interaction_blocks
         self.mid_fusion = mid_fusion
         self.decision = decision
+        self.modality_dropout = modality_dropout
+        self.modalities = list(stems.keys())
 
         self.classifier = nn.Sequential(
             nn.Dropout(dropout_rate),
             nn.Linear(decision_output_dim, num_classes),
         )
+
+        # 辅助分类头: 每个模态一个独立分类器
+        self.aux_classifiers = None
+        if aux_classifiers:
+            self.aux_classifiers = nn.ModuleDict({
+                m: nn.Sequential(
+                    nn.Dropout(dropout_rate),
+                    nn.Linear(mid_fusion_output_dim, num_classes),
+                )
+                for m in self.modalities
+            })
 
         self.mid_fusion_output_dim = mid_fusion_output_dim
 
@@ -59,8 +79,8 @@ class MultimodalPipelineV2(nn.Module):
         """
         Returns:
             Dict with:
-                "logits": Tensor [B, num_classes]
-                "aux": Optional[Dict] -- 来自 decision 的辅助信息
+                logits: Tensor [B, num_classes] — 融合logits
+                aux_logits: Optional[Dict[str, Tensor]] — 各模态辅助logits
         """
         # 1. Stem: 各模态独立特征提取
         stem_features = {}
@@ -77,6 +97,14 @@ class MultimodalPipelineV2(nn.Module):
 
         # 2. Tokenization: 投影到统一空间
         tokens = self.tokenizer(stem_features)
+
+        # 2.5 模态 Dropout: 训练时随机屏蔽模态 token
+        dropped_modalities = set()
+        if self.training and self.modality_dropout > 0:
+            for m in self.modalities:
+                if m in tokens and torch.rand(1).item() < self.modality_dropout:
+                    tokens[m] = torch.zeros_like(tokens[m])
+                    dropped_modalities.add(m)
 
         # 3. Cross-Modal Interaction
         for block in self.interaction_blocks:
@@ -99,7 +127,14 @@ class MultimodalPipelineV2(nn.Module):
         # 7. Classifier
         logits = self.classifier(decision_out)
 
-        return {"logits": logits, "aux": aux}
+        # 8. 辅助分类头 logits (仅训练时有效)
+        aux_logits = None
+        if self.aux_classifiers is not None and self.training:
+            aux_logits = {}
+            for m, pooled_m in pooled.items():
+                aux_logits[m] = self.aux_classifiers[m](pooled_m)
+
+        return logits, aux_logits
 
     def _pool_tokens(self, tokens: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
         """每个模态 token 序列池化为一个特征向量 [B, D]"""
