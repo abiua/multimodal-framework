@@ -1,111 +1,48 @@
-"""视频加载器"""
-
+"""Video数据加载器 — 从MP4提取固定帧数。"""
 import torch
 import numpy as np
-from typing import Dict, Any, List
+from typing import Dict, Optional
 from ..registry import BaseLoader, register_loader
 
 
-@register_loader('video_loader', description='视频加载器（抽取帧）', modality='video')
-class VideoLoader(BaseLoader):
-    """视频加载器 - 抽取固定数量的帧"""
-    
-    def __init__(self, num_frames: int = 16, image_size: int = 224, **kwargs):
+@register_loader('video_loader_frames', description='MP4视频帧提取加载器', modality='video')
+class VideoFrameLoader(BaseLoader):
+    """从MP4视频中均匀采样固定帧数。
+
+    Args:
+        num_frames: 采样帧数 (default 16)
+        frame_size: 帧resize尺寸 (default 224)
+        mean/std: 归一化参数 (default ImageNet-like for video)
+    """
+
+    def __init__(self, num_frames=16, frame_size=224,
+                 mean=None, std=None, **kwargs):
         super().__init__(**kwargs)
         self.num_frames = num_frames
-        self.image_size = image_size
-    
-    def load(self, path: str) -> List[np.ndarray]:
-        """加载视频并抽取帧"""
-        try:
-            import cv2
-            cap = cv2.VideoCapture(path)
-            frames = []
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            
-            # 均匀抽取帧
-            indices = np.linspace(0, total_frames - 1, self.num_frames, dtype=int)
-            
-            for idx in indices:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
-                ret, frame = cap.read()
-                if ret:
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    frames.append(frame)
-            
-            cap.release()
-            
-            # 如果帧数不足，复制最后一帧
-            while len(frames) < self.num_frames:
-                frames.append(frames[-1] if frames else np.zeros((self.image_size, self.image_size, 3), dtype=np.uint8))
-            
-            return frames
-        except ImportError:
-            raise ImportError("请安装opencv-python: pip install opencv-python")
-    
-    def transform_frames(self, frames: List[np.ndarray]) -> torch.Tensor:
-        """将帧转换为张量"""
-        try:
-            import torchvision.transforms as T
-            transform = T.Compose([
-                T.ToPILImage(),
-                T.Resize((self.image_size, self.image_size)),
-                T.ToTensor(),
-                T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-            ])
-            
-            tensor_frames = [transform(frame) for frame in frames]
-            return torch.stack(tensor_frames)  # (num_frames, C, H, W)
-        except:
-            # 简单转换
-            frames = np.array(frames)
-            frames = frames.transpose(0, 3, 1, 2)  # (T, H, W, C) -> (T, C, H, W)
-            return torch.tensor(frames, dtype=torch.float32) / 255.0
-    
-    def get_transform(self, is_training: bool = True):
-        return self.transform_frames
+        self.frame_size = frame_size
+        self.mean = mean or [0.45, 0.45, 0.45]
+        self.std = std or [0.225, 0.225, 0.225]
 
+    def load(self, path: str) -> 'np.ndarray':
+        """Read video and sample frames uniformly."""
+        import torchvision.io
+        video, _, _ = torchvision.io.read_video(path, output_format='TCHW', pts_unit='sec')
+        total_frames = video.shape[0]
+        if total_frames == 0:
+            raise ValueError(f"Video has 0 frames: {path}")
+        indices = np.linspace(0, total_frames - 1, self.num_frames, dtype=int)
+        return video[indices].numpy().astype(np.float32) / 255.0
 
-@register_loader('video_loader_3d', description='3D视频加载器（用于3D CNN）', modality='video')
-class VideoLoader3D(BaseLoader):
-    """3D视频加载器 - 输出适合3D CNN的格式"""
-    
-    def __init__(self, num_frames: int = 16, image_size: int = 112, **kwargs):
-        super().__init__(**kwargs)
-        self.num_frames = num_frames
-        self.image_size = image_size
-    
-    def load(self, path: str) -> torch.Tensor:
-        """加载视频并返回3D张量 (C, T, H, W)"""
-        try:
-            import cv2
-            cap = cv2.VideoCapture(path)
-            frames = []
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            
-            indices = np.linspace(0, total_frames - 1, self.num_frames, dtype=int)
-            
-            for idx in indices:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
-                ret, frame = cap.read()
-                if ret:
-                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    frame = cv2.resize(frame, (self.image_size, self.image_size))
-                    frames.append(frame)
-            
-            cap.release()
-            
-            while len(frames) < self.num_frames:
-                frames.append(frames[-1] if frames else np.zeros((self.image_size, self.image_size, 3), dtype=np.uint8))
-            
-            # 转换为 (C, T, H, W) 格式
-            video = np.array(frames)  # (T, H, W, C)
-            video = video.transpose(3, 0, 1, 2)  # (C, T, H, W)
-            video = video.astype(np.float32) / 255.0
-            
-            return torch.tensor(video)
-        except ImportError:
-            raise ImportError("请安装opencv-python: pip install opencv-python")
-    
-    def get_transform(self, is_training: bool = True):
-        return lambda x: x
+    def transform(self, data: 'np.ndarray') -> Dict[str, torch.Tensor]:
+        """Resize and normalize frames."""
+        frames = torch.from_numpy(data).float()  # [T, C, H, W]
+        if frames.shape[-1] != self.frame_size or frames.shape[-2] != self.frame_size:
+            frames = torch.nn.functional.interpolate(
+                frames, size=(self.frame_size, self.frame_size),
+                mode='bilinear', align_corners=False)
+        mean = torch.tensor(self.mean).view(1, 3, 1, 1)
+        std = torch.tensor(self.std).view(1, 3, 1, 1)
+        return {'video': (frames - mean) / std}
+
+    def get_transform(self, is_training=True):
+        return self.transform
