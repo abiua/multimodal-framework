@@ -458,5 +458,5 @@ class IdentityStem(BaseBackbone):
         super().__init__()
         self.feature_dim = feature_dim
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x=None, **kwargs) -> torch.Tensor:
         return x
