@@ -1,0 +1,79 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+## Commands
+
+### Training
+
+```bash
+# Single GPU
+CUDA_VISIBLE_DEVICES=0 PYTHONPATH=/home/pythoner/abiu/multimodal-framework torchrun --nproc_per_node=1 --master_port=29501 -m tools.train --config configs/fish_feeding_unireplknet.yaml
+
+# Multi-GPU (DDP)
+CUDA_VISIBLE_DEVICES=0,1,2,3 PYTHONPATH=/home/pythoner/abiu/multimodal-framework torchrun --nproc_per_node=4 --master_port=29501 -m tools.train --config configs/fish_feeding_unireplknet.yaml
+```
+
+### Evaluation
+
+```bash
+python -m tools.eval --config configs/fish_feeding_unireplknet.yaml --checkpoint output/<experiment>/best_model.pth
+```
+
+### Running tests
+
+```bash
+PYTHONPATH=/home/pythoner/abiu/multimodal-framework python -m pytest tests/ -v
+```
+
+## Architecture
+
+The framework has two pipeline architectures that coexist:
+
+### V1 Pipeline (`MultimodalClassifier` — `models/builder.py`)
+
+Traditional backbone → mid-fusion → classifier head. Supports optional **staged forward**: backbones implementing `StageableBackbone` can expose intermediate stages for cross-modal mid-fusion via `StageFusionAdapter`. Route selected when `config.model.unified_pipeline` is `None`.
+
+### V2 Pipeline (`MultimodalPipelineV2` — `models/pipeline_v2.py`)
+
+New unified flow: `Stem → Tokenization → InteractionBlocks → Per-Modal Pooling → Mid Fusion → Decision → Classifier`. Route selected when `config.model.unified_pipeline` is set. All components are config-driven and replaceable.
+
+### Registry Pattern
+
+Three registries auto-discover modules from their respective directories:
+- **`ModelZoo`** (`models/registry.py`) — backbones in `models/modelzoo/`, decorated with `@register_backbone(name)`
+- **`LoaderRegistry`** (`datasets/registry.py`) — data loaders in `datasets/loaders/`, decorated with `@register_loader(name)`
+- **`FusionRegistry`** (`models/fusion/registry.py`) — cross-modal fusion strategies for V2 interaction blocks
+- **`DecisionRegistry`** (`models/decision.py`) — post-fusion decision modules (identity, evidence, etc.)
+
+### Config System (`utils/config.py`)
+
+OmegaConf dataclass hierarchy: `Config → {Data, Class, Model, Train, Eval, System}Config`. `load_config()` merges structured schema + user YAML + CLI overrides, then runs `validate_config()` for runtime checks.
+
+### Data Flow
+
+`DataFactory` creates `MultimodalDataset` instances that scan a class-per-subdirectory layout, matching samples across modalities by filename stem (e.g., `sample_001.jpg` + `sample_001.wav`). Each modality gets its own `BaseLoader` for loading + transformations.
+
+### Key Directories
+
+| Directory | Purpose |
+|-----------|---------|
+| `models/modelzoo/` | Backbone implementations (resnet, audiocnn, tcn, unireplknet, video_mae, etc.) |
+| `models/fusion/` | Fusion strategies (gate, cross_attn, token_mix, etc.) |
+| `models/distillation/` | Cross-modal teacher-student distillation (contrastive loss + KL divergence) |
+| `models/heads/` | Classifier head and MultimodalFusion |
+| `datasets/loaders/` | Per-modality data loaders |
+| `trainers/` | Trainer, DistillationTrainer, checkpoint manager |
+| `utils/` | Config, distributed utils, metrics, TensorBoard logger |
+| `tools/` | Entry-point scripts (train, eval, train_distill) |
+| `configs/` | YAML config files per experiment |
+| `scripts/` | Data preparation utilities |
+
+### Backbone Interface (`models/backbone_base.py`)
+
+- **`BaseBackbone`**: standard backbones with `forward()` → `[B, feature_dim]`, plus optional `tokenize()` for V2 pipeline.
+- **`StageableBackbone`**: backbones exposing `init_state()`, `forward_stage(state, i)`, `forward_head(state)` for staged mid-fusion in V1.
+
+### Distributed Training
+
+The `Trainer` class handles DDP, mixed precision (FP16 with `GradScaler`), gradient clipping, non-finite gradient detection/skip, and distributed metric reduction. `tools/train.py` auto-detects `torchrun` environment variables for multi-GPU setup.

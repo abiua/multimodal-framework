@@ -1,0 +1,46 @@
+IMU频率影响分析报告
+======================================================================
+
+1HZ (11 片段)
+  平均采样点数: 2.3
+  accel_std: mean=0.0210 ± 0.0090
+  accel_rms: mean=0.3592 ± 0.0188
+  accel_range: mean=0.0443 ± 0.0201
+  accel_energy: mean=0.7543 ± 0.1453
+  gyro_std: mean=10.9590 ± 4.4810
+  gyro_rms: mean=16.3950 ± 4.1188
+  gyro_range: mean=23.1323 ± 9.8887
+  gyro_energy: mean=851.5882 ± 523.2615
+
+5HZ (407 片段)
+  平均采样点数: 10.0
+  accel_std: mean=0.0340 ± 0.0330
+  accel_rms: mean=0.3664 ± 0.0294
+  accel_range: mean=0.1167 ± 0.1224
+  accel_energy: mean=3.3792 ± 0.1712
+  gyro_std: mean=13.5251 ± 8.0725
+  gyro_rms: mean=13.7468 ± 8.3104
+  gyro_range: mean=45.3447 ± 28.6473
+  gyro_energy: mean=2964.4280 ± 4527.0264
+
+10HZ (144 片段)
+  平均采样点数: 20.0
+  accel_std: mean=0.0349 ± 0.0242
+  accel_rms: mean=0.3649 ± 0.0180
+  accel_range: mean=0.1510 ± 0.1260
+  accel_energy: mean=6.7232 ± 0.1561
+  gyro_std: mean=12.6830 ± 6.3361
+  gyro_rms: mean=12.7420 ± 6.3814
+  gyro_range: mean=51.0103 ± 29.2891
+  gyro_energy: mean=4505.3718 ± 4532.5144
+
+20HZ (41 片段)
+  平均采样点数: 40.0
+  accel_std: mean=0.0335 ± 0.0363
+  accel_rms: mean=0.3589 ± 0.0312
+  accel_range: mean=0.1847 ± 0.2910
+  accel_energy: mean=13.2822 ± 0.5179
+  gyro_std: mean=13.6293 ± 6.3606
+  gyro_rms: mean=13.6754 ± 6.3853
+  gyro_range: mean=61.2114 ± 37.6780
+  gyro_energy: mean=10273.4761 ± 9718.1847

@@ -1,14 +1,14 @@
-# configs/default_multimodal_v2.yaml
-# 统一多模态流水线示例配置
+# configs/test_imu_freq_20hz.yaml
+# 10Hz IMU采样率测试配置
 
 data:
   batch_size: 16
   num_workers: 4
   pin_memory: true
 
-  train_path: "data/fish_feeding_local/train"
-  val_path: "data/fish_feeding_local/val"
-  test_path: "data/fish_feeding_local/test"
+  train_path: "data/multimodal_freq_split/20hz"
+  val_path: "data/multimodal_freq_split/20hz"
+  test_path: "data/multimodal_freq_split/20hz"
 
   modalities:
     - image
@@ -24,23 +24,22 @@ data:
       extra_params:
         sample_rate: 16000
         max_length: 160000
-        n_mels: 224
-        time_steps: 224
+        n_mels: 248
+        time_steps: 248
     wave:
       type: wave_loader
       extra_params:
-        max_length: 512
+        max_length: 48
         num_features: 6
         normalize: true
 
-  image_size: 224
+  image_size: 248
 
 classes:
-  num_classes: 3
-  class_names: ["None", Strong, Weak]
+  num_classes: 4
+  class_names: ["1", "2", "3", "4"]
 
 model:
-  # Stem backbone 配置（与旧路径一致，复用 modelzoo）
   backbones:
     image:
       type: resnet18
@@ -60,7 +59,6 @@ model:
       pretrained: false
       freeze: false
 
-  # === 新流水线特有配置 ===
   unified_pipeline:
     token_dim: 256
 
@@ -99,14 +97,14 @@ model:
   dropout_rate: 0.35
 
 train:
-  epochs: 100
+  epochs: 1
   learning_rate: 0.00005
   weight_decay: 0.001
   lr_scheduler: cosine
-  warmup_epochs: 5
+  warmup_epochs: 0
   optimizer: adamw
-  label_smoothing: 0.1
-  early_stop: { enabled: true, patience: 8, min_delta: 0.001, monitor: val_loss, mode: min }
+  label_smoothing: 0.0
+  early_stop: { enabled: false }
   val_interval: 1
 
 eval:
@@ -119,8 +117,8 @@ system:
   gpu_ids: [0]
   distributed: false
   fp16: false
-  log_interval: 20
-  save_interval: 10
-  output_dir: output/multimodal_v2
-  tensorboard_enabled: true
-  experiment_name: multimodal_v2
+  log_interval: 10
+  save_interval: 50
+  output_dir: output/test_20hz
+  tensorboard_enabled: false
+  experiment_name: test_20hz

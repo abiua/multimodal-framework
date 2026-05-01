@@ -32,7 +32,7 @@ train_ids, test_ids = [], []
 for cls, segs in sorted(by_class.items()):
     random.shuffle(segs)
     n_train = max(1, int(len(segs) * 0.8))
-    train_ids.extend(segs)
+    train_ids.extend(segs[:n_train])
     test_ids.extend(segs[n_train:])
     print(f"Class {cls}: {len(segs)} total, {n_train} train, {len(segs) - n_train} test")
 

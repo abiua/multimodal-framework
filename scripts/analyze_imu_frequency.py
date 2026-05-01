@@ -10,6 +10,7 @@ from collections import defaultdict
 import argparse
 
 
+
 def load_imu_df(csv_path: str) -> pd.DataFrame:
     """加载IMU CSV为DataFrame，兼容中文表头和时间字符串。"""
     rows = []
@@ -215,6 +216,9 @@ def main():
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
+
+    plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
+    plt.rcParams['axes.unicode_minus'] = False
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)

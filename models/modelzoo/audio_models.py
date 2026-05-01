@@ -24,14 +24,14 @@ from ..backbone_base import StageableBackbone, BaseBackbone
 class AudioCNN(StageableBackbone):
     num_stages = 4
 
-    def __init__(self, feature_dim=512, n_mels=128, dropout=0.1, **kwargs):
+    def __init__(self, feature_dim=512, n_mels=128, dropout=0.1, in_channels=1, **kwargs):
         super().__init__()
         self.feature_dim = feature_dim
         self.stage_dims = [32, 64, 128, 128]
 
         self.stages = nn.ModuleList([
             nn.Sequential(
-                nn.Conv2d(1, 32, 3, padding=1),
+                nn.Conv2d(in_channels, 32, 3, padding=1),
                 nn.BatchNorm2d(32),
                 nn.ReLU(),
                 nn.MaxPool2d(2),

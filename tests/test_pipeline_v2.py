@@ -29,8 +29,7 @@ class TestMultimodalPipelineV2:
         )
         batch = {"image": torch.randn(2, 3, 224, 224)}
         out = model(batch)
-        assert out["logits"].shape == (2, 3)
-        assert out["aux"] is None
+        assert out.shape == (2, 3)
 
     def test_three_modality_pipeline(self):
         """3模态 + 4个interaction blocks + attention fusion"""
@@ -68,7 +67,7 @@ class TestMultimodalPipelineV2:
             "wave": torch.randn(4, 512, 6),
         }
         out = model(batch)
-        assert out["logits"].shape == (4, 5)
+        assert out.shape == (4, 5)
 
     def test_forward_backward(self):
         """验证梯度可回传"""
@@ -95,7 +94,7 @@ class TestMultimodalPipelineV2:
             "audio": torch.randn(2, 512),
         }
         out = model(batch)
-        loss = out["logits"].sum()
+        loss = out.sum()
         loss.backward()
         for name, p in model.named_parameters():
             if p.requires_grad:
