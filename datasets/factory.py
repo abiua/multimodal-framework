@@ -41,7 +41,10 @@ class MultimodalDataset(Dataset):
             'text': ['.txt'],
             'audio': ['.wav', '.mp3', '.flac', '.ogg'],
             'video': ['.mp4', '.avi', '.mov', '.mkv'],
-            'wave': ['.csv']
+            'wave': ['.csv'],
+            'imu_accel': ['.csv'],
+            'imu_gyro': ['.csv'],
+            'imu_angle': ['.csv'],
         }
         
         self.samples = self._load_samples()
