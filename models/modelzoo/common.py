@@ -16,6 +16,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from ..backbone_base import BaseBackbone, StageableBackbone
+from ..registry import register_backbone
 
 
 # ==============================================================================
@@ -438,3 +439,24 @@ class HuggingFaceWrapper(BaseBackbone):
                 pooled = outputs[:, 0, :]
 
         return self.proj(pooled)
+
+
+# ==============================================================================
+# Identity Stem
+# ==============================================================================
+
+@register_backbone('identity_stem', description='Pass-through stem for raw tensor inputs', modality='any')
+class IdentityStem(BaseBackbone):
+    """Identity stem -- pass-through raw tensors, used before MultiChannelTCN for IMU channels.
+
+    IMU channel loader already outputs normalized [T, 3] data,
+    no additional feature extraction is needed.
+    Actual encoding is done by MultiChannelTCN.
+    """
+
+    def __init__(self, feature_dim: int = 3, **kwargs):
+        super().__init__()
+        self.feature_dim = feature_dim
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x
