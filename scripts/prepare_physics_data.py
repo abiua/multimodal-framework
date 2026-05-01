@@ -24,7 +24,7 @@ import csv
 import shutil
 import sys
 from pathlib import Path
-from collections import defaultdict, Counter
+from collections import Counter
 
 from sklearn.model_selection import train_test_split
 
@@ -116,7 +116,7 @@ def build_splits(
     val_size: float,
     test_size: float,
     seed: int,
-):
+) -> tuple:
     """Perform stratified train/val/test split.
 
     First splits off test, then splits the remainder into train/val.
@@ -221,6 +221,11 @@ def main():
             print(f"ERROR: {desc} does not exist: {path}", file=sys.stderr)
             sys.exit(1)
 
+    if output_dir.exists():
+        print(f"ERROR: Output directory already exists: {output_dir}", file=sys.stderr)
+        print("Remove it first or choose a different --output path.", file=sys.stderr)
+        sys.exit(1)
+
     # ── Load labels ──────────────────────────────────────────────────
     print("Loading labels...")
     labels_raw = load_labels(labels_path)
@@ -250,11 +255,6 @@ def main():
 
     # ── Copy segments ────────────────────────────────────────────────
     print("\nCopying segments...")
-    if output_dir.exists():
-        print(f"  Output directory already exists: {output_dir}")
-        print("  Remove it first or choose a different --output path.")
-        sys.exit(1)
-
     total_copied = 0
     total_segments = 0
 
