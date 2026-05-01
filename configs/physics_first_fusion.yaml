@@ -1,0 +1,102 @@
+# Physics-First Asymmetric Fusion: Video + Audio + IMU 三模态
+data:
+  batch_size: 8
+  num_workers: 4
+  pin_memory: true
+  train_path: "data/fish_feeding_v3/train"
+  val_path: "data/fish_feeding_v3/val"
+  test_path: "data/fish_feeding_v3/test"
+  modalities: [imu_accel, imu_gyro, imu_angle, audio, video]
+  loaders:
+    imu_accel:
+      type: imu_channel_loader
+      extra_params: { channel: accel, max_length: 512 }
+    imu_gyro:
+      type: imu_channel_loader
+      extra_params: { channel: gyro, max_length: 512 }
+    imu_angle:
+      type: imu_channel_loader
+      extra_params: { channel: angle, max_length: 512 }
+    audio:
+      type: audio_loader_stereo
+      extra_params:
+        sample_rate: 16000
+        max_length: 160000
+        n_mels: 224
+        time_steps: 224
+    video:
+      type: video_loader_frames
+      extra_params: { num_frames: 16, frame_size: 224 }
+  image_size: 224
+
+classes:
+  num_classes: 4
+  class_names: ["Weak", "Medium", "Strong", "None"]
+
+model:
+  backbones:
+    imu_accel: { type: identity_stem, feature_dim: 3 }
+    imu_gyro:  { type: identity_stem, feature_dim: 3 }
+    imu_angle: { type: identity_stem, feature_dim: 3 }
+    audio:
+      type: audiocnn
+      feature_dim: 512
+      pretrained: false
+      freeze: false
+      extra_params: { in_channels: 2 }
+    video:
+      type: video_mae
+      feature_dim: 768
+      pretrained: false
+      freeze: false
+      extra_params:
+        img_size: 224
+        patch_size: 16
+        tube_size: 2
+        embed_dim: 768
+        depth: 12
+        num_heads: 12
+
+  unified_pipeline:
+    token_dim: 256
+    physical_encoder:
+      num_cross_attn_layers: 1
+      num_shared_transformer_layers: 2
+      num_heads: 8
+      dropout: 0.1
+    asymmetric_interaction:
+      num_blocks: 2
+      num_heads: 4
+      dropout: 0.1
+    evidence_gate:
+      hidden_dim: 64
+    mid_fusion_output_dim: 256
+    decision: { type: identity }
+  dropout_rate: 0.35
+
+train:
+  epochs: 80
+  learning_rate: 0.0001
+  weight_decay: 0.001
+  lr_scheduler: cosine
+  warmup_epochs: 5
+  optimizer: adamw
+  label_smoothing: 0.1
+  early_stop: { enabled: true, patience: 15, min_delta: 0.001, monitor: val_loss, mode: min }
+  val_interval: 1
+
+eval:
+  metrics: [accuracy, precision, recall, f1]
+  save_predictions: true
+  confusion_matrix: true
+
+system:
+  seed: 42
+  gpu_ids: [0]
+  distributed: false
+  fp16: false
+  log_interval: 10
+  save_interval: 10
+  output_dir: output/physics_first_fusion
+  tensorboard_enabled: true
+  experiment_name: physics_first_fusion

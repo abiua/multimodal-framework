@@ -112,6 +112,29 @@ class PEResolutionConfig:
 
 
 @dataclass
+class PhysicalEncoderConfig:
+    """Physical Dynamics Encoder 配置 (V3)"""
+    num_cross_attn_layers: int = 1
+    num_shared_transformer_layers: int = 2
+    num_heads: int = 8
+    dropout: float = 0.1
+
+
+@dataclass
+class AsymmetricInteractionConfig:
+    """Asymmetric Interaction 配置 (V3)"""
+    num_blocks: int = 2
+    num_heads: int = 4
+    dropout: float = 0.1
+
+
+@dataclass
+class EvidenceGateConfig:
+    """Evidence Gate 配置 (V3)"""
+    hidden_dim: int = 64
+
+
+@dataclass
 class UnifiedPipelineConfig:
     """统一多模态流水线配置（新）"""
     token_dim: int = 256
@@ -124,6 +147,10 @@ class UnifiedPipelineConfig:
     # 模态平衡 (V2.1)
     modality_dropout: float = 0.0
     aux_classifiers: bool = True
+    # Physics-First Fusion (V3)
+    physical_encoder: Optional[PhysicalEncoderConfig] = None
+    asymmetric_interaction: Optional[AsymmetricInteractionConfig] = None
+    evidence_gate: Optional[EvidenceGateConfig] = None
 
 
 @dataclass
