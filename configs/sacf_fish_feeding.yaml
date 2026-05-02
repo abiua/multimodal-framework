@@ -40,15 +40,13 @@ model:
       freeze: false
       extra_params: {}
     audio:
-      # type is informational only — training script constructs AudioTemporalEncoder directly
-      type: audiocnn
-      feature_dim: 512
+      type: _audio_temporal
+      feature_dim: 256
       pretrained: false
       freeze: false
       extra_params:
         in_channels: 2
     wave:
-      # type is informational only — training script constructs WaveEncoder directly
       type: _wave_encoder
       feature_dim: 256
 

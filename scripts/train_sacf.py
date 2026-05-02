@@ -90,10 +90,8 @@ def build_sacf_pipeline(config, device):
 
     wave_encoder = WaveEncoder(in_channels=6, output_dim=D).to(device)
 
-    audio_cfg = config.model.backbones['audio']
     audio_encoder = AudioTemporalEncoder(
-        in_channels=audio_cfg.extra_params.get('in_channels', 2),
-        output_dim=D,
+        in_channels=2, output_dim=D,
         dropout=config.model.dropout_rate,
     ).to(device)
 
