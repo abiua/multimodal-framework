@@ -5,3 +5,5 @@ from .strategies import (
     CrossAttentionFusion,
     TokenMixerFusion,
 )
+from .temporal_consensus import BidirectionalCrossAttention
+from .film_gate import FiLMGate
