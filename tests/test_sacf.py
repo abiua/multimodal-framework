@@ -79,3 +79,50 @@ class TestBidirectionalCrossAttention:
         null_audio = bca.null_audio.expand(2, 14, -1).to(device)
         out = bca(null_wave, null_audio, wave_masked=True, audio_masked=True)
         assert out.shape[0] == 2
+
+
+class TestFiLMGate:
+    @pytest.fixture
+    def device(self):
+        return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    def test_output_shape(self, device):
+        from models.fusion.film_gate import FiLMGate
+        gate = FiLMGate(image_dim=2048, phys_dim=256, residual_dim=64).to(device)
+        z_img = torch.randn(4, 2048, device=device)
+        phys = torch.randn(4, 256, device=device)
+        out, aux = gate(z_img, phys)
+        assert out.shape == (4, 256)
+        assert aux['film_scale'].shape == (4, 256)
+        assert aux['film_shift'].shape == (4, 256)
+        assert aux['gate'].shape == (4, 64)
+
+    def test_film_identity_when_image_zero(self, device):
+        from models.fusion.film_gate import FiLMGate
+        gate = FiLMGate(image_dim=2048, phys_dim=256, residual_dim=64).to(device)
+        z_img = torch.zeros(4, 2048, device=device)
+        phys = torch.randn(4, 256, device=device)
+        out, aux = gate(z_img, phys)
+        assert torch.allclose(aux['film_scale'], torch.ones_like(aux['film_scale']), atol=1e-3)
+        assert torch.allclose(aux['film_shift'], torch.zeros_like(aux['film_shift']), atol=5e-2)
+
+    def test_forward_backward(self, device):
+        from models.fusion.film_gate import FiLMGate
+        gate = FiLMGate(image_dim=2048, phys_dim=256, residual_dim=64).to(device)
+        z_img = torch.randn(4, 2048, device=device)
+        phys = torch.randn(4, 256, device=device)
+        out, _ = gate(z_img, phys)
+        out.sum().backward()
+        for name, p in gate.named_parameters():
+            if p.requires_grad:
+                assert p.grad is not None, f"No grad for {name}"
+
+    def test_residual_dropout_training(self, device):
+        from models.fusion.film_gate import FiLMGate
+        gate = FiLMGate(image_dim=2048, phys_dim=256, residual_dim=64, r_dropout=1.0).to(device)
+        gate.train()
+        z_img = torch.randn(4, 2048, device=device)
+        phys = torch.randn(4, 256, device=device)
+        out1, _ = gate(z_img, phys)
+        out2, _ = gate(z_img, phys)
+        assert torch.allclose(out1, out2)
