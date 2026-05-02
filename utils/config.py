@@ -87,6 +87,9 @@ class ModelConfig:
     # 新统一流水线（为 None 时走旧路径）
     unified_pipeline: Optional[UnifiedPipelineConfig] = None
 
+    # SACF v2 pipeline (extra free-form config, accessed via DictConfig)
+    sacf_pipeline: Optional[Dict[str, Any]] = None
+
 
 @dataclass
 class InteractionBlockConfig:
@@ -184,6 +187,9 @@ class TrainConfig:
 
     early_stop: EarlyStopConfig = field(default_factory=EarlyStopConfig)
     val_interval: int = 1
+
+    # SACF v2 loss weights (free-form config)
+    sacf: Optional[Dict[str, Any]] = None
 
 
 @dataclass
