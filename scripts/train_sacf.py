@@ -147,7 +147,7 @@ def train_epoch(model, loader, optimizer, criterion, device, scaler, sacf_cfg):
         optimizer.zero_grad()
 
         if scaler is not None:
-            with torch.cuda.amp.autocast():
+            with torch.amp.autocast('cuda'):
                 logits, aux = model(batch)
 
                 loss_main = criterion(logits, labels)
@@ -240,7 +240,7 @@ def main():
 
     model = build_sacf_pipeline(config, device)
     if is_distributed:
-        model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+        model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
 
     if not is_distributed or local_rank == 0:
         n_total = sum(p.numel() for p in model.parameters())
@@ -271,7 +271,7 @@ def main():
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=config.train.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
-    scaler = torch.cuda.amp.GradScaler() if config.system.fp16 else None
+    scaler = torch.amp.GradScaler('cuda') if config.system.fp16 else None
     sacf_cfg = config.train.sacf
     best_acc, patience = 0.0, 0
 
