@@ -109,42 +109,58 @@ def run_gradient_analysis(model, loader, device, n_batches=50):
     return results
 
 
-def run_ablation(model, loader, device):
-    """Accuracy drop when zeroing each modality in SACF."""
+def run_ablation(model, dataset, bs, device):
+    """Accuracy drop when zeroing each modality in SACF.
+
+    Zeros the modality tensor in the batch dict then calls model(batch)
+    so the exact same forward path is used as evaluation.
+    Uses fresh DataLoader for each scenario to avoid iterator state issues.
+    """
     model.eval()
     criterion = nn.CrossEntropyLoss()
 
     def eval_ablated(zero_wave=False, zero_audio=False, zero_image=False):
+        loader = DataLoader(dataset, batch_size=bs, shuffle=False)
         correct, total, loss_sum = 0, 0, 0.0
         for batch in loader:
             batch = to_device(batch, device)
             labels = batch.pop('class_idx')
 
-            wave_input = model._resolve_input(batch, 'wave')
-            if isinstance(wave_input, dict):
-                wave_input = wave_input.get('wave', list(wave_input.values())[0])
-            if zero_wave:
-                wave_input = torch.zeros_like(wave_input)
-            wave_tokens = model._encode_wave(wave_input)
+            modified_batch = {}
+            for k, v in batch.items():
+                if isinstance(v, torch.Tensor):
+                    modified_batch[k] = v.clone()
+                elif isinstance(v, dict):
+                    modified_batch[k] = {kk: vv.clone() if isinstance(vv, torch.Tensor) else vv for kk, vv in v.items()}
+                else:
+                    modified_batch[k] = v
 
-            audio_input = model._resolve_input(batch, 'audio')
-            audio_tokens = model._encode_audio(audio_input)
-            if zero_audio:
-                audio_tokens = torch.zeros_like(audio_tokens)
+            # Zero specific modalities in the batch
+            if zero_wave and 'wave' in modified_batch:
+                if isinstance(modified_batch['wave'], dict):
+                    for k in modified_batch['wave']:
+                        if isinstance(modified_batch['wave'][k], torch.Tensor):
+                            modified_batch['wave'][k] = torch.zeros_like(modified_batch['wave'][k])
+                elif isinstance(modified_batch['wave'], torch.Tensor):
+                    modified_batch['wave'] = torch.zeros_like(modified_batch['wave'])
 
-            physical_tokens = model.temporal_consensus(wave_tokens, audio_tokens,
-                                                       wave_masked=zero_wave,
-                                                       audio_masked=zero_audio)
-            phys_pooled = model.phys_pool_proj(physical_tokens.mean(dim=1))
+            if zero_audio and 'audio' in modified_batch:
+                if isinstance(modified_batch['audio'], dict):
+                    for k in modified_batch['audio']:
+                        if isinstance(modified_batch['audio'][k], torch.Tensor):
+                            modified_batch['audio'][k] = torch.zeros_like(modified_batch['audio'][k])
+                elif isinstance(modified_batch['audio'], torch.Tensor):
+                    modified_batch['audio'] = torch.zeros_like(modified_batch['audio'])
 
-            image_input = model._resolve_input(batch, 'image')
-            z_img = model._encode_image(image_input)
-            if zero_image:
-                f_final = phys_pooled
-            else:
-                f_final, _ = model.film_gate(z_img, phys_pooled)
+            if zero_image and 'image' in modified_batch:
+                if isinstance(modified_batch['image'], dict):
+                    for k in modified_batch['image']:
+                        if isinstance(modified_batch['image'][k], torch.Tensor):
+                            modified_batch['image'][k] = torch.zeros_like(modified_batch['image'][k])
+                elif isinstance(modified_batch['image'], torch.Tensor):
+                    modified_batch['image'] = torch.zeros_like(modified_batch['image'])
 
-            logits = model.final_classifier(f_final)
+            logits, _ = model(modified_batch)
             loss = criterion(logits, labels)
             loss_sum += loss.item() * len(labels)
             correct += (logits.argmax(1) == labels).sum().item()
@@ -156,15 +172,13 @@ def run_ablation(model, loader, device):
 
     for name, zw, za, zi in [('no_wave', True, False, False),
                                ('no_audio', False, True, False),
-                               ('no_image', False, False, True)]:
+                               ('no_image', False, False, True),
+                               ('wave_audio_only', False, False, True)]:
         acc, loss = eval_ablated(zero_wave=zw, zero_audio=za, zero_image=zi)
         results[name] = {'acc': acc, 'loss': loss, 'acc_drop': full_acc - acc}
 
-    # Wave+Audio only (no Image)
-    acc, loss = eval_ablated(zero_image=True)
-    results['wave_audio_only'] = {'acc': acc, 'loss': loss, 'acc_drop': full_acc - acc}
-
-    # Per-modal classifier accuracies
+    # Per-modal classifier accuracies using full pipeline
+    loader = DataLoader(dataset, batch_size=bs, shuffle=False)
     correct, total = 0, 0
     for batch in loader:
         batch = to_device(batch, device)
@@ -175,6 +189,7 @@ def run_ablation(model, loader, device):
     results['physics_only'] = {'acc': correct / total,
                                'acc_drop': full_acc - correct / total}
 
+    loader = DataLoader(dataset, batch_size=bs, shuffle=False)
     correct, total = 0, 0
     for batch in loader:
         batch = to_device(batch, device)
@@ -229,9 +244,16 @@ def main():
     macro = report['macro avg']
     logger.info(f"  Macro Avg: prec={macro['precision']:.4f} rec={macro['recall']:.4f} f1={macro['f1-score']:.4f}")
 
-    # 2. Gradient Analysis
+    # 2. Ablation — MUST run before gradient analysis because gradient
+    # analysis puts model in train mode and corrupts BatchNorm running stats.
     logger.info("\n" + "=" * 60)
-    logger.info("2. Gradient-based Modality Contribution")
+    logger.info("2. Ablation Study")
+    logger.info("=" * 60)
+    abl_results = run_ablation(model, test_ds, bs, device)
+
+    # 3. Gradient Analysis (runs in train mode — keep last)
+    logger.info("\n" + "=" * 60)
+    logger.info("3. Gradient-based Modality Contribution")
     logger.info("=" * 60)
     grad_results = run_gradient_analysis(model, test_loader, device, args.grad_batches)
 
@@ -250,12 +272,6 @@ def main():
     logger.info("\nFusion component gradients:")
     for key, vals in grad_results['fusion'].items():
         logger.info(f"  {key}: mean={vals['mean']:.4f} +/- {vals['std']:.4f}")
-
-    # 3. Ablation
-    logger.info("\n" + "=" * 60)
-    logger.info("3. Ablation Study")
-    logger.info("=" * 60)
-    abl_results = run_ablation(model, test_loader, device)
     for name in ['full', 'no_wave', 'no_audio', 'no_image', 'wave_audio_only', 'physics_only', 'image_only']:
         if name in abl_results:
             r = abl_results[name]
