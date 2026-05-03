@@ -23,7 +23,8 @@ python -m tools.eval --config configs/fish_feeding_unireplknet.yaml --checkpoint
 ### Running tests
 
 ```bash
-PYTHONPATH=/home/pythoner/abiu/multimodal-framework python -m pytest tests/ -v
+PYTHONPATH=/home/pythoner/abiu/multimodal-framework python -m pytest tests/ -v --rootdir=tests
+# --rootdir=tests required: the project root __init__.py has relative imports that conflict with pytest discovery
 ```
 
 ## Architecture
@@ -37,6 +38,13 @@ Traditional backbone → mid-fusion → classifier head. Supports optional **sta
 ### V2 Pipeline (`MultimodalPipelineV2` — `models/pipeline_v2.py`)
 
 New unified flow: `Stem → Tokenization → InteractionBlocks → Per-Modal Pooling → Mid Fusion → Decision → Classifier`. Route selected when `config.model.unified_pipeline` is set. All components are config-driven and replaceable.
+
+### V3 / SACF v2 Pipelines
+
+- **V3** (`models/pipeline_v3.py`): Physics-First Asymmetric Fusion (IMU/Wave+Audio+Image). EvidenceGate confirmed dead (gradient≈0 across datasets/visual modalities).
+- **SACF v2** (`models/pipeline_sacf.py`): Stage-Aware Consensus Fusion — Wave↔Audio bidirectional cross-attn → FiLM modulation + gated residual from Image → 3 independent classifiers + consensus KL loss. Modal dropout (30%) with learnable null tokens.
+- SACF training: `CUDA_VISIBLE_DEVICES=0,1,2,3 PYTHONPATH=/home/pythoner/abiu/multimodal-framework torchrun --nproc_per_node=4 --master_port=29505 scripts/train_sacf.py --config configs/sacf_fish_feeding.yaml --output output/sacf_fish_feeding`
+- SACF eval (module import to avoid `__main__` quirks): `PYTHONPATH=/home/pythoner/abiu/multimodal-framework python -B -c "import sys; sys.path.insert(0,'scripts'); sys.argv[1:]=['--config','configs/sacf_fish_feeding.yaml','--checkpoint','output/sacf_fish_feeding/best_model.pth','--gpu','0','--output','output/sacf_fish_feeding/analysis']; from evaluate_sacf import main; main()"`
 
 ### Registry Pattern
 
@@ -77,3 +85,14 @@ OmegaConf dataclass hierarchy: `Config → {Data, Class, Model, Train, Eval, Sys
 ### Distributed Training
 
 The `Trainer` class handles DDP, mixed precision (FP16 with `GradScaler`), gradient clipping, non-finite gradient detection/skip, and distributed metric reduction. `tools/train.py` auto-detects `torchrun` environment variables for multi-GPU setup.
+
+- DDP with modal dropout: requires `find_unused_parameters=True` (masked modalities don't participate in loss)
+- Always `torch.cuda.synchronize()` before `dist.destroy_process_group()` to avoid NCCL cleanup timeout
+- Deprecated AMP API: use `torch.amp.GradScaler('cuda')` and `torch.amp.autocast('cuda')`, not `torch.cuda.amp.*`
+
+### Evaluation Gotchas
+
+- **Ablation MUST run before gradient analysis**: gradient analysis uses `model.train()` which corrupts BatchNorm running statistics. Either reorder (ablation first) or reload model checkpoint after gradient analysis.
+- Batch dict structure: `image` is direct Tensor, `audio` is `{'mel_spectrogram': Tensor}`, `wave` is `{'wave': Tensor}`. Zero-out in ablation must match nested dict structure.
+- Create fresh DataLoaders per ablation scenario to avoid iterator state issues.
+- File persistence: `/home/ai/data/pythoner/` and `/home/pythoner/` are same filesystem but different mount paths. If Write tool fails to persist, use Bash heredoc.
