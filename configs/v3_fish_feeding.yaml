@@ -1,0 +1,94 @@
+# V3 Physics-First Asymmetric Fusion: Image + Wave + Audio (Fish Feeding 3-class)
+data:
+  batch_size: 16
+  num_workers: 4
+  pin_memory: true
+  train_path: "data/fish_feeding_local/train"
+  val_path: "data/fish_feeding_local/val"
+  test_path: "data/fish_feeding_local/test"
+  modalities: [image, audio, wave]
+  loaders:
+    image:
+      type: image_loader
+      extra_params: {}
+    audio:
+      type: audio_loader_stereo
+      extra_params:
+        sample_rate: 16000
+        max_length: 160000
+        n_mels: 224
+        time_steps: 224
+        n_fft: 1024
+    wave:
+      type: wave_loader
+      extra_params:
+        max_length: 512
+        num_features: 6
+        normalize: true
+  image_size: 224
+
+classes:
+  num_classes: 3
+  class_names: ["None", "Strong", "Weak"]
+
+model:
+  backbones:
+    image:
+      type: resnet50
+      feature_dim: 2048
+      pretrained: true
+      freeze: false
+      extra_params: {}
+    audio:
+      type: audiocnn
+      feature_dim: 512
+      pretrained: false
+      freeze: false
+      extra_params: { in_channels: 2 }
+    wave:
+      type: _wave_encoder
+      feature_dim: 256
+
+  unified_pipeline:
+    token_dim: 256
+    physical_encoder:
+      num_cross_attn_layers: 1
+      num_shared_transformer_layers: 2
+      num_heads: 8
+      dropout: 0.1
+    asymmetric_interaction:
+      num_blocks: 2
+      num_heads: 4
+      dropout: 0.1
+    evidence_gate:
+      hidden_dim: 64
+    mid_fusion_output_dim: 256
+    decision: { type: identity }
+  dropout_rate: 0.35
+
+train:
+  epochs: 80
+  learning_rate: 0.0001
+  weight_decay: 0.05
+  lr_scheduler: cosine
+  warmup_epochs: 5
+  optimizer: adamw
+  label_smoothing: 0.1
+  early_stop: { enabled: true, patience: 15, min_delta: 0.001, monitor: val_loss, mode: min }
+  val_interval: 1
+
+eval:
+  metrics: [accuracy, precision, recall, f1]
+  save_predictions: true
+  confusion_matrix: true
+
+system:
+  seed: 42
+  gpu_ids: [0, 1, 2, 3]
+  distributed: true
+  fp16: true
+  log_interval: 20
+  save_interval: 10
+  output_dir: output/v3_fish_feeding
+  tensorboard_enabled: false
+  experiment_name: v3_fish_feeding
