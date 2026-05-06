@@ -16,6 +16,7 @@ from models.builder import ModelBuilder
 from models.modelzoo.audio_temporal import AudioTemporalEncoder
 from models.fusion.temporal_consensus import BidirectionalCrossAttention
 from models.fusion.film_gate import FiLMGate
+from models.fusion.aer import AdaptiveEvidenceReasoning
 from models.pipeline_sacf import SACFPipeline
 
 
@@ -114,7 +115,7 @@ def build_sacf_pipeline(config, device):
         residual_dim=fg_cfg.residual_dim, r_dropout=fg_cfg.r_dropout,
     ).to(device)
 
-    return SACFPipeline(
+    pipeline = SACFPipeline(
         wave_encoder=wave_encoder,
         audio_encoder=audio_encoder,
         image_backbone=image_backbone,
@@ -127,6 +128,13 @@ def build_sacf_pipeline(config, device):
         dropout_rate=config.model.dropout_rate,
     ).to(device)
 
+    aer = AdaptiveEvidenceReasoning(
+        num_evidences=3,
+        num_classes=config.classes.num_classes,
+    ).to(device)
+
+    return pipeline, aer
+
 
 def to_device(obj, device):
     if isinstance(obj, torch.Tensor):
@@ -136,10 +144,11 @@ def to_device(obj, device):
     return obj
 
 
-def train_epoch(model, loader, optimizer, criterion, device, scaler, sacf_cfg):
+def train_epoch(model, aer, loader, optimizer, criterion, device, scaler, sacf_cfg):
     model.train()
+    aer.train()
     total_loss, correct, total = 0.0, 0, 0
-    alpha, beta, gamma = sacf_cfg.alpha, sacf_cfg.beta, sacf_cfg.gamma
+    alpha, beta = sacf_cfg.alpha, sacf_cfg.beta
 
     for batch in loader:
         batch = to_device(batch, device)
@@ -150,48 +159,37 @@ def train_epoch(model, loader, optimizer, criterion, device, scaler, sacf_cfg):
             with torch.amp.autocast('cuda'):
                 logits, aux = model(batch)
 
-                loss_main = criterion(logits, labels)
+                aer_log_probs = aer([aux['phys_logits'], aux['image_logits'], logits])
+                loss_main = criterion(torch.exp(aer_log_probs), labels)
+
                 loss_phys = criterion(aux['phys_logits'], labels)
                 loss_image = criterion(aux['image_logits'], labels)
 
-                # Consensus: KL(stopgrad(p_final) || p_phys) + KL(stopgrad(p_final) || p_img)
-                p_final = F.log_softmax(logits.detach(), dim=-1)
-                loss_cons = 0.5 * (
-                    F.kl_div(p_final, F.log_softmax(aux['phys_logits'], dim=-1),
-                             log_target=True, reduction='batchmean') +
-                    F.kl_div(p_final, F.log_softmax(aux['image_logits'], dim=-1),
-                             log_target=True, reduction='batchmean')
-                )
-
-                loss = loss_main + alpha * loss_phys + beta * loss_image + gamma * loss_cons
+                loss = loss_main + alpha * loss_phys + beta * loss_image
 
             scaler.scale(loss).backward()
             scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(aer.parameters(), 1.0)
             scaler.step(optimizer)
             scaler.update()
         else:
             logits, aux = model(batch)
 
-            loss_main = criterion(logits, labels)
+            aer_log_probs = aer([aux['phys_logits'], aux['image_logits'], logits])
+            loss_main = criterion(torch.exp(aer_log_probs), labels)
+
             loss_phys = criterion(aux['phys_logits'], labels)
             loss_image = criterion(aux['image_logits'], labels)
 
-            p_final = F.log_softmax(logits.detach(), dim=-1)
-            loss_cons = 0.5 * (
-                F.kl_div(p_final, F.log_softmax(aux['phys_logits'], dim=-1),
-                         log_target=True, reduction='batchmean') +
-                F.kl_div(p_final, F.log_softmax(aux['image_logits'], dim=-1),
-                         log_target=True, reduction='batchmean')
-            )
-
-            loss = loss_main + alpha * loss_phys + beta * loss_image + gamma * loss_cons
+            loss = loss_main + alpha * loss_phys + beta * loss_image
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(aer.parameters(), 1.0)
             optimizer.step()
 
         total_loss += loss.item() * len(labels)
-        correct += (logits.argmax(1) == labels).sum().item()
+        correct += (torch.exp(aer_log_probs).argmax(1) == labels).sum().item()
         total += len(labels)
 
     return total_loss / total, correct / total
@@ -238,9 +236,10 @@ def main():
         output_dir.mkdir(parents=True, exist_ok=True)
     logger = setup_logger(log_file=str(output_dir / 'train.log')) if (not is_distributed or local_rank == 0) else None
 
-    model = build_sacf_pipeline(config, device)
+    model, aer = build_sacf_pipeline(config, device)
     if is_distributed:
         model = DDP(model, device_ids=[local_rank], output_device=local_rank, find_unused_parameters=True)
+        aer = DDP(aer, device_ids=[local_rank], output_device=local_rank)
 
     if not is_distributed or local_rank == 0:
         n_total = sum(p.numel() for p in model.parameters())
@@ -278,8 +277,8 @@ def main():
     for epoch in range(args.epochs):
         if is_distributed:
             train_sampler.set_epoch(epoch)
-        train_loss, train_acc = train_epoch(model, train_loader, optimizer, criterion, device, scaler, sacf_cfg)
-        val_loss, val_acc = validate(model, val_loader, criterion, device)
+        train_loss, train_acc = train_epoch(model, aer, train_loader, optimizer, criterion, device, scaler, sacf_cfg)
+        val_loss, val_acc = validate(model, aer, val_loader, criterion, device)
         scheduler.step()
 
         if is_distributed:
@@ -294,7 +293,13 @@ def main():
                 best_acc = val_acc
                 patience = 0
                 sd = model.module.state_dict() if is_distributed else model.state_dict()
-                torch.save({'model_state_dict': sd, 'epoch': epoch, 'val_acc': best_acc}, output_dir / 'best_model.pth')
+                aer_sd = aer.module.state_dict() if is_distributed else aer.state_dict()
+                torch.save({
+                    'model_state_dict': sd,
+                    'aer_state_dict': aer_sd,
+                    'epoch': epoch,
+                    'val_acc': best_acc
+                }, output_dir / 'best_model.pth')
                 logger.info(f"  Saved best (val_acc={best_acc:.4f})")
             else:
                 patience += 1
