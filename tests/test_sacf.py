@@ -227,3 +227,84 @@ class TestSACFPipeline:
         knowledge = pipeline.get_teacher_knowledge(batch)
         for key in ['logits', 'phys_features', 'phys_logits', 'image_logits', 'final_features']:
             assert key in knowledge, f"Missing key: {key}"
+
+
+class TestAdaptiveEvidenceReasoning:
+    @pytest.fixture
+    def device(self):
+        return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    def test_output_shape(self, device):
+        from models.fusion.aer import AdaptiveEvidenceReasoning
+        aer = AdaptiveEvidenceReasoning(num_evidences=3, num_classes=3).to(device)
+        logits_list = [
+            torch.randn(4, 3, device=device),
+            torch.randn(4, 3, device=device),
+            torch.randn(4, 3, device=device),
+        ]
+        out = aer(logits_list)
+        assert out.shape == (4, 3), f"Expected [4,3], got {out.shape}"
+        probs = torch.exp(out)
+        assert torch.allclose(probs.sum(dim=-1), torch.ones(4, device=device), atol=1e-5)
+
+    def test_forward_backward(self, device):
+        from models.fusion.aer import AdaptiveEvidenceReasoning
+        aer = AdaptiveEvidenceReasoning(num_evidences=3, num_classes=3).to(device)
+        logits_list = [
+            torch.randn(4, 3, device=device),
+            torch.randn(4, 3, device=device),
+            torch.randn(4, 3, device=device),
+        ]
+        out = aer(logits_list)
+        out.sum().backward()
+        for name, p in aer.named_parameters():
+            assert p.grad is not None, f"No grad for {name}"
+
+    def test_consistent_prediction_for_identical_evidence(self, device):
+        from models.fusion.aer import AdaptiveEvidenceReasoning
+        aer = AdaptiveEvidenceReasoning(num_evidences=2, num_classes=3).to(device)
+        x = torch.randn(4, 3, device=device)
+        out = aer([x, x])
+        probs = torch.exp(out)
+        assert (probs >= 0).all() and (probs <= 1).all()
+
+    def test_different_num_evidences(self, device):
+        from models.fusion.aer import AdaptiveEvidenceReasoning
+        aer = AdaptiveEvidenceReasoning(num_evidences=2, num_classes=5).to(device)
+        logits_list = [
+            torch.randn(8, 5, device=device),
+            torch.randn(8, 5, device=device),
+        ]
+        out = aer(logits_list)
+        assert out.shape == (8, 5)
+        probs = torch.exp(out)
+        assert torch.allclose(probs.sum(dim=-1), torch.ones(8, device=device), atol=1e-5)
+
+    def test_high_confidence_evidence_dominates(self, device):
+        from models.fusion.aer import AdaptiveEvidenceReasoning
+        aer = AdaptiveEvidenceReasoning(num_evidences=2, num_classes=3).to(device)
+        e1 = torch.tensor([[10.0, -10.0, -10.0]], device=device).repeat(4, 1)
+        e2 = torch.tensor([[-1.0, 2.0, -1.0]], device=device).repeat(4, 1)
+        out = aer([e1, e2])
+        preds = torch.exp(out).argmax(dim=-1)
+        assert (preds == 0).all(), f"Expected class 0 to dominate, got {preds}"
+
+    def test_parameters_update_during_training(self, device):
+        from models.fusion.aer import AdaptiveEvidenceReasoning
+        aer = AdaptiveEvidenceReasoning(num_evidences=3, num_classes=3).to(device)
+        w_before = aer.raw_weight.clone()
+        r_before = aer.raw_reliability.clone()
+        logits_list = [
+            torch.randn(4, 3, device=device),
+            torch.randn(4, 3, device=device),
+            torch.randn(4, 3, device=device),
+        ]
+        opt = torch.optim.SGD(aer.parameters(), lr=0.1)
+        for _ in range(10):
+            opt.zero_grad()
+            out = aer(logits_list)
+            loss = -out[:, 0].mean()
+            loss.backward()
+            opt.step()
+        assert not torch.allclose(aer.raw_weight, w_before), "Weights did not update"
+        assert not torch.allclose(aer.raw_reliability, r_before), "Reliabilities did not update"
