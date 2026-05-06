@@ -40,17 +40,24 @@ def compute_grad_norm(module):
 
 
 @torch.no_grad()
-def run_evaluation(model, loader, device):
+def run_evaluation(model, aer, loader, device):
     model.eval()
+    if aer is not None:
+        aer.eval()
     all_preds, all_labels = [], []
     correct, total = 0, 0
     for batch in loader:
         batch = to_device(batch, device)
         labels = batch.pop('class_idx')
-        logits, _ = model(batch)
-        correct += (logits.argmax(1) == labels).sum().item()
+        logits, aux = model(batch)
+        if aer is not None:
+            aer_out = aer([aux['phys_logits'], aux['image_logits'], logits])
+            preds = torch.exp(aer_out).argmax(1)
+        else:
+            preds = logits.argmax(1)
+        correct += (preds == labels).sum().item()
         total += len(labels)
-        all_preds.extend(logits.argmax(1).cpu().tolist())
+        all_preds.extend(preds.cpu().tolist())
         all_labels.extend(labels.cpu().tolist())
     acc = correct / total
     cm = confusion_matrix(all_labels, all_preds)
