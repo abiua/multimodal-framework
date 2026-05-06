@@ -7,3 +7,4 @@ from .strategies import (
 )
 from .temporal_consensus import BidirectionalCrossAttention
 from .film_gate import FiLMGate
+from .aer import AdaptiveEvidenceReasoning
