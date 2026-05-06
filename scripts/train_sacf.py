@@ -196,16 +196,18 @@ def train_epoch(model, aer, loader, optimizer, criterion, device, scaler, sacf_c
 
 
 @torch.no_grad()
-def validate(model, loader, criterion, device):
+def validate(model, aer, loader, criterion, device):
     model.eval()
+    aer.eval()
     total_loss, correct, total = 0.0, 0, 0
     for batch in loader:
         batch = to_device(batch, device)
         labels = batch.pop('class_idx')
-        logits, _ = model(batch)
-        loss = criterion(logits, labels)
+        logits, aux = model(batch)
+        aer_log_probs = aer([aux['phys_logits'], aux['image_logits'], logits])
+        loss = criterion(torch.exp(aer_log_probs), labels)
         total_loss += loss.item() * len(labels)
-        correct += (logits.argmax(1) == labels).sum().item()
+        correct += (torch.exp(aer_log_probs).argmax(1) == labels).sum().item()
         total += len(labels)
     return total_loss / total, correct / total
 
@@ -268,7 +270,9 @@ def main():
         logger.info(f"Train: {len(train_ds)}, Val: {len(val_ds)}, Batch/GPU: {config.data.batch_size}")
 
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=config.train.weight_decay)
+    optimizer = torch.optim.AdamW(
+        list(model.parameters()) + list(aer.parameters()),
+        lr=args.lr, weight_decay=config.train.weight_decay)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     scaler = torch.amp.GradScaler('cuda') if config.system.fp16 else None
     sacf_cfg = config.train.sacf
