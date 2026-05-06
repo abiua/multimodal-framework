@@ -16,6 +16,7 @@ from datasets import DataFactory
 
 sys.path.insert(0, str(Path(__file__).parent))
 from train_sacf import build_sacf_pipeline
+from models.fusion.aer import AdaptiveEvidenceReasoning
 
 MODALITY_NAMES = {'wave': 'Wave', 'audio': 'Audio', 'image': 'Image'}
 
@@ -59,32 +60,45 @@ def run_evaluation(model, loader, device):
     return acc, cm, report, all_preds, all_labels
 
 
-def run_gradient_analysis(model, loader, device, n_batches=50):
+def run_gradient_analysis(model, aer, loader, device, n_batches=50):
     """Gradient-based modality contribution analysis for SACF."""
     model.train()
+    if aer is not None:
+        aer.train()
     criterion = nn.CrossEntropyLoss()
     accum = defaultdict(lambda: defaultdict(list))
 
-    alpha, beta, gamma = 0.5, 0.5, 0.3
+    alpha, beta = 0.5, 0.5
 
     for i, batch in enumerate(loader):
         if i >= n_batches:
             break
         model.zero_grad()
+        if aer is not None:
+            aer.zero_grad()
         batch = to_device(batch, device)
         labels = batch.pop('class_idx')
         logits, aux = model(batch)
 
-        loss_main = criterion(logits, labels)
+        if aer is not None:
+            aer_log_probs = aer([aux['phys_logits'], aux['image_logits'], logits])
+            loss_main = criterion(torch.exp(aer_log_probs), labels)
+        else:
+            loss_main = criterion(logits, labels)
+
         loss_phys = criterion(aux['phys_logits'], labels)
         loss_image = criterion(aux['image_logits'], labels)
-        p_final = F.log_softmax(logits.detach(), dim=-1)
-        loss_cons = 0.5 * (
-            F.kl_div(p_final, F.log_softmax(aux['phys_logits'], dim=-1),
-                     log_target=True, reduction='batchmean') +
-            F.kl_div(p_final, F.log_softmax(aux['image_logits'], dim=-1),
-                     log_target=True, reduction='batchmean'))
-        loss = loss_main + alpha * loss_phys + beta * loss_image + gamma * loss_cons
+
+        if aer is None:
+            p_final = F.log_softmax(logits.detach(), dim=-1)
+            loss_cons = 0.5 * (
+                F.kl_div(p_final, F.log_softmax(aux['phys_logits'], dim=-1),
+                         log_target=True, reduction='batchmean') +
+                F.kl_div(p_final, F.log_softmax(aux['image_logits'], dim=-1),
+                         log_target=True, reduction='batchmean'))
+            loss = loss_main + alpha * loss_phys + beta * loss_image + 0.3 * loss_cons
+        else:
+            loss = loss_main + alpha * loss_phys + beta * loss_image
         loss.backward()
 
         accum['wave']['encoder'].append(compute_grad_norm(model.wave_encoder))
@@ -109,7 +123,7 @@ def run_gradient_analysis(model, loader, device, n_batches=50):
     return results
 
 
-def run_ablation(model, dataset, bs, device):
+def run_ablation(model, aer, dataset, bs, device):
     """Accuracy drop when zeroing each modality in SACF.
 
     Zeros the modality tensor in the batch dict then calls model(batch)
@@ -117,6 +131,8 @@ def run_ablation(model, dataset, bs, device):
     Uses fresh DataLoader for each scenario to avoid iterator state issues.
     """
     model.eval()
+    if aer is not None:
+        aer.eval()
     criterion = nn.CrossEntropyLoss()
 
     def eval_ablated(zero_wave=False, zero_audio=False, zero_image=False):
@@ -135,7 +151,6 @@ def run_ablation(model, dataset, bs, device):
                 else:
                     modified_batch[k] = v
 
-            # Zero specific modalities in the batch
             if zero_wave and 'wave' in modified_batch:
                 if isinstance(modified_batch['wave'], dict):
                     for k in modified_batch['wave']:
@@ -160,10 +175,15 @@ def run_ablation(model, dataset, bs, device):
                 elif isinstance(modified_batch['image'], torch.Tensor):
                     modified_batch['image'] = torch.zeros_like(modified_batch['image'])
 
-            logits, _ = model(modified_batch)
+            logits, aux = model(modified_batch)
+            if aer is not None:
+                aer_out = aer([aux['phys_logits'], aux['image_logits'], logits])
+                preds = torch.exp(aer_out).argmax(1)
+            else:
+                preds = logits.argmax(1)
             loss = criterion(logits, labels)
             loss_sum += loss.item() * len(labels)
-            correct += (logits.argmax(1) == labels).sum().item()
+            correct += (preds == labels).sum().item()
             total += len(labels)
         return correct / total, loss_sum / total
 
@@ -220,10 +240,21 @@ def main():
     config = load_config(args.config)
     logger.info(f"Config: {args.config}")
 
-    model = build_sacf_pipeline(config, device)
+    model, aer = build_sacf_pipeline(config, device)
     ckpt = torch.load(args.checkpoint, map_location=device, weights_only=True)
     model.load_state_dict(ckpt['model_state_dict'])
-    logger.info(f"Loaded checkpoint epoch={ckpt.get('epoch', '?')}, val_acc={ckpt.get('val_acc', 0):.4f}")
+    if 'aer_state_dict' in ckpt:
+        aer.load_state_dict(ckpt['aer_state_dict'])
+        has_aer = True
+        logger.info(f"Loaded checkpoint epoch={ckpt.get('epoch', '?')}, val_acc={ckpt.get('val_acc', 0):.4f} (with AER)")
+        w = F.softplus(aer.raw_weight).detach().cpu()
+        r = torch.sigmoid(aer.raw_reliability).detach().cpu()
+        logger.info(f"AER weights (w): phys={w[0]:.4f} image={w[1]:.4f} final={w[2]:.4f}")
+        logger.info(f"AER reliability (r): phys={r[0]:.4f} image={r[1]:.4f} final={r[2]:.4f}")
+    else:
+        aer = None
+        has_aer = False
+        logger.info(f"Loaded checkpoint epoch={ckpt.get('epoch', '?')}, val_acc={ckpt.get('val_acc', 0):.4f} (baseline, no AER)")
 
     factory = DataFactory(config)
     test_ds = factory.create_dataset(config.data.test_path, is_training=False)
@@ -235,7 +266,7 @@ def main():
     logger.info("\n" + "=" * 60)
     logger.info("1. Model Evaluation")
     logger.info("=" * 60)
-    acc, cm, report, preds, labels = run_evaluation(model, test_loader, device)
+    acc, cm, report, preds, labels = run_evaluation(model, aer, test_loader, device)
     logger.info(f"Test Accuracy: {acc:.4f}")
     logger.info(f"Confusion Matrix:\n{cm}")
     for cls_key in ['None', 'Strong', 'Weak']:
@@ -249,13 +280,13 @@ def main():
     logger.info("\n" + "=" * 60)
     logger.info("2. Ablation Study")
     logger.info("=" * 60)
-    abl_results = run_ablation(model, test_ds, bs, device)
+    abl_results = run_ablation(model, aer, test_ds, bs, device)
 
     # 3. Gradient Analysis (runs in train mode — keep last)
     logger.info("\n" + "=" * 60)
     logger.info("3. Gradient-based Modality Contribution")
     logger.info("=" * 60)
-    grad_results = run_gradient_analysis(model, test_loader, device, args.grad_batches)
+    grad_results = run_gradient_analysis(model, aer, test_loader, device, args.grad_batches)
 
     mod_grads = {}
     for mod in ['wave', 'audio', 'image']:
@@ -286,7 +317,13 @@ def main():
                         for mod, v in mod_grads.items()},
         'ablation': {k: {kk: float(vv) for kk, vv in v.items()}
                     for k, v in abl_results.items()},
+        'has_aer': has_aer,
     }
+    if has_aer:
+        w = F.softplus(aer.raw_weight).detach().cpu()
+        r = torch.sigmoid(aer.raw_reliability).detach().cpu()
+        summary['aer_weights'] = {'phys': float(w[0]), 'image': float(w[1]), 'final': float(w[2])}
+        summary['aer_reliabilities'] = {'phys': float(r[0]), 'image': float(r[1]), 'final': float(r[2])}
     with open(output_dir / 'analysis_summary.json', 'w') as f:
         json.dump(summary, f, indent=2)
     logger.info(f"\nSummary saved to {output_dir / 'analysis_summary.json'}")
