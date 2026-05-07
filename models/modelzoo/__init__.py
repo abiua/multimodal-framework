@@ -13,6 +13,8 @@ from . import text_models
 from . import video_models
 from . import wave_models
 from . import audio_temporal
+from . import audio_ast
+from . import audio_sslam
 try:
     from . import unireplknet_models
 except ImportError:

@@ -1,0 +1,93 @@
+data:
+  batch_size: 16
+  num_workers: 4
+  pin_memory: true
+
+  train_path: "data/fish_feeding_local/train"
+  val_path: "data/fish_feeding_local/val"
+  test_path: "data/fish_feeding_local/test"
+
+  modalities:
+    - audio
+
+  loaders:
+    audio:
+      type: audio_raw_loader
+      extra_params:
+        sample_rate: 16000
+        max_length: 160000
+
+  image_size: 224
+
+classes:
+  num_classes: 3
+  class_names:
+    - "None"
+    - "Strong"
+    - "Weak"
+
+model:
+  backbones:
+    audio:
+      type: sslam
+      feature_dim: 768
+      pretrained: true
+      freeze: false
+      extra_params:
+        target_length: 1024
+
+  fusion_type: concat
+  fusion_hidden_dim: 512
+  mid_fusion_enabled: false
+
+  dropout_rate: 0.3
+  classifier_hidden_dims: [256]
+
+train:
+  epochs: 30
+  learning_rate: 0.00005
+  weight_decay: 0.01
+
+  lr_scheduler: cosine
+  warmup_epochs: 3
+  step_size: 30
+  gamma: 0.1
+
+  optimizer: adamw
+  momentum: 0.9
+
+  label_smoothing: 0.1
+  mixup_alpha: 0.0
+  cutmix_alpha: 0.0
+
+  early_stop:
+    enabled: true
+    patience: 10
+    min_delta: 0.001
+    monitor: accuracy
+    mode: max
+
+  val_interval: 1
+
+eval:
+  metrics: [accuracy, precision, recall, f1]
+  save_predictions: true
+  confusion_matrix: true
+
+system:
+  seed: 42
+  gpu_ids: [0]
+  distributed: false
+  fp16: false
+
+  log_interval: 10
+  save_interval: 10
+
+  output_dir: "output/solo_audio_sslam"
+  resume: ""
+
+  dist_backend: "nccl"
+  dist_url: "env://"
+
+  tensorboard_enabled: false
+  experiment_name: "solo_audio_sslam"
