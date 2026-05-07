@@ -87,6 +87,9 @@ OmegaConf dataclass hierarchy: `Config → {Data, Class, Model, Train, Eval, Sys
 - New modelzoo modules MUST be imported in `models/modelzoo/__init__.py` to trigger auto-registration
 - Check for name collisions with existing `@register_backbone` entries before naming
 - HuggingFace downloads need `http_proxy=http://127.0.0.1:7890 https_proxy=...` env vars (same for pip GitHub installs)
+- HF custom models (SSLAM): use `sys.path.insert` to add model dir, then import local `modeling_*.py`
+- SpeechBrain models (BEATs): `BEATs(ckp_path=...)` loads checkpoint internally
+- Large model files (>100MB) should be gitignored or stored outside repo
 
 ### HuggingFace Backbone Integration
 
@@ -95,6 +98,21 @@ OmegaConf dataclass hierarchy: `Config → {Data, Class, Model, Train, Eval, Sys
 - Solo audio training: `modalities: [audio]`, `mid_fusion_enabled: false`, data paths to `data/fish_feeding_local/{train,val,test}`
 - FP16 may trigger `GradScaler.unscale_()` double-call crash on some models — disable with `fp16: false` if it occurs
 - Two audio loader types: `audio_raw_loader` (raw waveform for AST/BEATs) vs `audio_loader_stereo` (2ch mel spectrogram)
+
+### Available Audio Backbones (Solo Training)
+
+| Backbone | Register Name | Params | Pretrained | Notes |
+|----------|-------------|--------|------------|-------|
+| AST (HF) | `ast_hf` | 86M | AudioSet | `MIT/ast-finetuned-audioset-10-10-0.4593` |
+| SSLAM | `sslam` | 90M | AudioSet-2M (data2vec2.0) | `ta012/SSLAM_pretrain` on HF |
+| BEATs | `beats` | 90M | AudioSet-2M (iter3+) | SpeechBrain impl, OneDrive checkpoint |
+
+Solo training command:
+```bash
+export http_proxy=http://127.0.0.1:7890 https_proxy=http://127.0.0.1:7890
+CUDA_VISIBLE_DEVICES=0 PYTHONPATH=/home/pythoner/abiu/multimodal-framework \
+  bash -c 'exec -a <process_name> python -m tools.train --config configs/solo_audio_<model>.yaml' &
+```
 
 ### Distributed Training
 
@@ -109,6 +127,8 @@ The `Trainer` class handles DDP, mixed precision (FP16 with `GradScaler`), gradi
 - **SwanLab** replaced TensorBoard. Default: `swanlab_enabled: true`, project `"MM"`, TensorBoard disabled.
 - API key in `swanlab_api_key.txt` (gitignored). `SwanLabLogger` reads it at init time — never set as global env var.
 - Web dashboard: https://swanlab.cn/@abiu/MM
+- Proxy: HuggingFace needs port 7890, SwanLab works on both 7890 and 8118 — use 7890 for everything
+- Process naming: use `exec -a <name> python -m tools.train` to identify training processes in `ps aux`
 
 ### Evaluation Gotchas
 
