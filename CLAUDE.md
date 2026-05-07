@@ -72,7 +72,7 @@ OmegaConf dataclass hierarchy: `Config → {Data, Class, Model, Train, Eval, Sys
 | `models/heads/` | Classifier head and MultimodalFusion |
 | `datasets/loaders/` | Per-modality data loaders |
 | `trainers/` | Trainer, DistillationTrainer, checkpoint manager |
-| `utils/` | Config, distributed utils, metrics, TensorBoard logger |
+| `utils/` | Config, distributed utils, metrics, SwanLab logger (TensorBoard deprecated) |
 | `tools/` | Entry-point scripts (train, eval, train_distill) |
 | `configs/` | YAML config files per experiment |
 | `scripts/` | Data preparation utilities |
@@ -82,6 +82,20 @@ OmegaConf dataclass hierarchy: `Config → {Data, Class, Model, Train, Eval, Sys
 - **`BaseBackbone`**: standard backbones with `forward()` → `[B, feature_dim]`, plus optional `tokenize()` for V2 pipeline.
 - **`StageableBackbone`**: backbones exposing `init_state()`, `forward_stage(state, i)`, `forward_head(state)` for staged mid-fusion in V1.
 
+### Adding New Backbones
+
+- New modelzoo modules MUST be imported in `models/modelzoo/__init__.py` to trigger auto-registration
+- Check for name collisions with existing `@register_backbone` entries before naming
+- HuggingFace downloads need `http_proxy=http://127.0.0.1:7890 https_proxy=...` env vars (same for pip GitHub installs)
+
+### HuggingFace Backbone Integration
+
+- Use `torchaudio` transforms (MelSpectrogram + AmplitudeToDB) instead of HF feature extractor for GPU-speed batch processing
+- AudioSet mel normalization: `(x - (-4.2677393)) / (4.5689974 * 2)`
+- Solo audio training: `modalities: [audio]`, `mid_fusion_enabled: false`, data paths to `data/fish_feeding_local/{train,val,test}`
+- FP16 may trigger `GradScaler.unscale_()` double-call crash on some models — disable with `fp16: false` if it occurs
+- Two audio loader types: `audio_raw_loader` (raw waveform for AST/BEATs) vs `audio_loader_stereo` (2ch mel spectrogram)
+
 ### Distributed Training
 
 The `Trainer` class handles DDP, mixed precision (FP16 with `GradScaler`), gradient clipping, non-finite gradient detection/skip, and distributed metric reduction. `tools/train.py` auto-detects `torchrun` environment variables for multi-GPU setup.
@@ -90,9 +104,20 @@ The `Trainer` class handles DDP, mixed precision (FP16 with `GradScaler`), gradi
 - Always `torch.cuda.synchronize()` before `dist.destroy_process_group()` to avoid NCCL cleanup timeout
 - Deprecated AMP API: use `torch.amp.GradScaler('cuda')` and `torch.amp.autocast('cuda')`, not `torch.cuda.amp.*`
 
+### Logging & Monitoring
+
+- **SwanLab** replaced TensorBoard. Default: `swanlab_enabled: true`, project `"MM"`, TensorBoard disabled.
+- API key in `swanlab_api_key.txt` (gitignored). `SwanLabLogger` reads it at init time — never set as global env var.
+- Web dashboard: https://swanlab.cn/@abiu/MM
+
 ### Evaluation Gotchas
 
 - **Ablation MUST run before gradient analysis**: gradient analysis uses `model.train()` which corrupts BatchNorm running statistics. Either reorder (ablation first) or reload model checkpoint after gradient analysis.
 - Batch dict structure: `image` is direct Tensor, `audio` is `{'mel_spectrogram': Tensor}`, `wave` is `{'wave': Tensor}`. Zero-out in ablation must match nested dict structure.
 - Create fresh DataLoaders per ablation scenario to avoid iterator state issues.
 - File persistence: `/home/ai/data/pythoner/` and `/home/pythoner/` are same filesystem but different mount paths. If Write tool fails to persist, use Bash heredoc.
+
+## Known Test Failures
+
+- `test_pipeline_v2.py`: 3 failures (shape mismatch, pre-existing)
+- `test_pipeline_v3.py`: 4 errors (FileNotFoundError/TypeError, pre-existing)
