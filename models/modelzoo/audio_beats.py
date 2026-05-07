@@ -41,6 +41,12 @@ class BEATsBackbone(BaseBackbone):
         self._num_mel_bins = num_mel_bins
 
         if pretrained:
+            if sample_rate != 16000 or num_mel_bins != 128:
+                raise ValueError(
+                    f"Pretrained BEATs requires sample_rate=16000, num_mel_bins=128. "
+                    f"Got sample_rate={sample_rate}, num_mel_bins={num_mel_bins}. "
+                    f"Use pretrained=False for custom audio parameters."
+                )
             if checkpoint_path is None:
                 checkpoint_path = '/home/ai/data/pythoner/abiu/multimodal-framework/models/modelzoo/BEATs/BEATs_iter3_plus_AS2M.pt'
 
@@ -98,9 +104,8 @@ class BEATsBackbone(BaseBackbone):
         elif x.dim() == 3:
             x = x.squeeze(1)
 
-        import torch as _torch
         B = x.shape[0]
-        wav_lens = _torch.ones(B, device=x.device)
+        wav_lens = torch.ones(B, device=x.device)
         out = self.encoder.extract_features(x, wav_lens=wav_lens)
         feats = out[0] if isinstance(out, tuple) else out
         return feats.mean(dim=1)  # [B, 768]
