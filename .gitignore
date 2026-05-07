@@ -5,4 +5,7 @@
 __pycache__/
 *.pyc
 *.zip
+*.pdf
+*.pth
 .worktrees/
+swanlab_api_key.txtmodels/modelzoo/SSLAM-main/
