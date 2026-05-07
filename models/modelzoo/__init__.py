@@ -15,6 +15,7 @@ from . import wave_models
 from . import audio_temporal
 from . import audio_ast
 from . import audio_sslam
+from . import audio_beats
 try:
     from . import unireplknet_models
 except ImportError:
