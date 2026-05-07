@@ -31,10 +31,10 @@ class BEATsBackbone(BaseBackbone):
     ):
         super().__init__()
 
-        from speechbrain.lobes.models.beats import BEATs, BEATsConfig
+        from speechbrain.lobes.models.beats import BEATs
 
         if checkpoint_path is None:
-            checkpoint_path = '/home/ai/data/pythoner/abiu/multimodal-framework/models/modelzoo/BEATs/BEATs_iter3_plus_as2m.pt'
+            checkpoint_path = '/home/ai/data/pythoner/abiu/multimodal-framework/models/modelzoo/BEATs/BEATs_iter3_plus_AS2M.pt'
 
         if pretrained:
             import os
@@ -43,13 +43,9 @@ class BEATsBackbone(BaseBackbone):
                     f"BEATs checkpoint not found: {checkpoint_path}\n"
                     "Download from: https://1drv.ms/u/s!AqeByhGUtINrgcpke6_lRSZEKD5j2Q?e=A3FpOf"
                 )
-            ckpt = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
-            cfg = BEATsConfig(ckpt['cfg'])
-            self.encoder = BEATs(cfg)
-            self.encoder.load_state_dict(ckpt['model'], strict=False)
+            self.encoder = BEATs(ckp_path=checkpoint_path, freeze=False)
         else:
-            cfg = BEATsConfig()
-            self.encoder = BEATs(cfg)
+            self.encoder = BEATs(ckp_path=None, freeze=False)
 
         if freeze:
             for p in self.encoder.parameters():
@@ -71,6 +67,11 @@ class BEATsBackbone(BaseBackbone):
         elif x.dim() == 3:
             x = x.squeeze(1)
 
-        # BEATs expects [B, T] raw audio at 16kHz, processes internally via Kaldi fbank
-        feats, _ = self.encoder.extract_features(x)
+        # Workaround speechbrain BEATs bug: padding_mask not initialized when wav_lens is None
+        # We call extract_features via a try/except or pass wav_lens explicitly
+        import torch as _torch
+        B = x.shape[0]
+        wav_lens = _torch.ones(B, device=x.device)
+        out = self.encoder.extract_features(x, wav_lens=wav_lens)
+        feats = out[0] if isinstance(out, tuple) else out
         return feats.mean(dim=1)  # [B, 768]
