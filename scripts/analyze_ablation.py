@@ -34,20 +34,18 @@ def extract_metrics(output_dir: Path) -> Optional[dict]:
     2. SwanLab summary files
     3. Console log files
     """
-    # Source 1: best_model.pth
+    # Source 1: best_model.pth (reads best_val_acc directly from checkpoint)
     best_model = output_dir / 'best_model.pth'
     if best_model.exists():
         try:
             import torch
             ckpt = torch.load(best_model, map_location='cpu', weights_only=True)
             if isinstance(ckpt, dict):
-                metrics = ckpt.get('metrics', {})
-                acc = metrics.get('accuracy') or metrics.get('val_accuracy') or metrics.get('acc')
-                f1 = metrics.get('f1') or metrics.get('val_f1')
+                acc = ckpt.get('best_val_acc')
                 if acc is not None:
                     return {
                         'accuracy': float(acc),
-                        'f1': float(f1) if f1 is not None else None,
+                        'f1': None,  # Trainer does not save best F1 in checkpoint
                     }
         except Exception:
             pass
@@ -71,16 +69,17 @@ def extract_metrics(output_dir: Path) -> Optional[dict]:
         except Exception:
             pass
 
-    # Source 3: Parse log files for "best accuracy"
+    # Source 3: Parse log files for "新的最佳模型! 准确率: XX%"
     for pattern in ['*.log', 'logs/*.log', 'train.log']:
         for log_file in output_dir.glob(pattern):
             try:
                 with open(log_file) as f:
                     best_acc = 0.0
                     for line in f:
-                        if 'Best val accuracy' in line or 'best accuracy' in line:
+                        if '新的最佳模型! 准确率:' in line:
                             try:
-                                val = float(line.split(':')[-1].strip().rstrip('%')) / 100
+                                pct_str = line.split(':')[-1].strip().rstrip('%')
+                                val = float(pct_str) / 100.0
                                 if val > best_acc:
                                     best_acc = val
                             except ValueError:
