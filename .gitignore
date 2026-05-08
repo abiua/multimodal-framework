@@ -7,5 +7,8 @@ __pycache__/
 *.zip
 *.pdf
 *.pth
+*.pt
 .worktrees/
-swanlab_api_key.txtmodels/modelzoo/SSLAM-main/
+swanlab_api_key.txt
+models/modelzoo/SSLAM-main/
+swanlab_api_key.txt

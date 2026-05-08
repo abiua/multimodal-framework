@@ -218,8 +218,11 @@ class SystemConfig:
     dist_backend: str = "nccl"
     dist_url: str = "env://"
 
-    tensorboard_enabled: bool = True
+    tensorboard_enabled: bool = False
     experiment_name: str = "default"
+
+    swanlab_enabled: bool = True
+    swanlab_project: str = "MM"
 
 
 @dataclass

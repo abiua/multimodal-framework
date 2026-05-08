@@ -135,14 +135,14 @@ class DistillationTrainer(Trainer):
             
             self.global_step += 1
             
-            # TensorBoard: 记录batch级别指标
-            if self.tb_logger and self.global_step % self.config.system.log_interval == 0:
-                self.tb_logger.add_scalar('train/batch_loss', distill_loss.item(), self.global_step)
-                self.tb_logger.add_scalar('train/batch_acc', 100. * correct / total, self.global_step)
-                self.tb_logger.add_scalar('train/batch_hard_loss', loss_dict['hard_loss'].item(), self.global_step)
-                self.tb_logger.add_scalar('train/batch_kl_loss', loss_dict['kl_loss'].item(), self.global_step)
-                self.tb_logger.add_scalar('train/batch_contrastive_loss', loss_dict['contrastive_loss'].item(), self.global_step)
-                self.tb_logger.add_scalar('train/learning_rate', self._get_current_lr(), self.global_step)
+            # SwanLab: 记录batch级别指标
+            if self.swanlab_logger and self.global_step % self.config.system.log_interval == 0:
+                self.swanlab_logger.add_scalar('train/batch_loss', distill_loss.item(), self.global_step)
+                self.swanlab_logger.add_scalar('train/batch_acc', 100. * correct / total, self.global_step)
+                self.swanlab_logger.add_scalar('train/batch_hard_loss', loss_dict['hard_loss'].item(), self.global_step)
+                self.swanlab_logger.add_scalar('train/batch_kl_loss', loss_dict['kl_loss'].item(), self.global_step)
+                self.swanlab_logger.add_scalar('train/batch_contrastive_loss', loss_dict['contrastive_loss'].item(), self.global_step)
+                self.swanlab_logger.add_scalar('train/learning_rate', self._get_current_lr(), self.global_step)
             
             # 日志（只在主进程）
             if batch_idx % self.config.system.log_interval == 0:
@@ -160,14 +160,14 @@ class DistillationTrainer(Trainer):
         epoch_contrastive_loss = total_contrastive_loss / len(self.train_loader)
         epoch_acc = 100. * correct / total
         
-        # TensorBoard: 记录epoch级别指标
-        if self.tb_logger:
-            self.tb_logger.add_scalar('train/epoch_loss', epoch_loss, self.current_epoch)
-            self.tb_logger.add_scalar('train/epoch_hard_loss', epoch_hard_loss, self.current_epoch)
-            self.tb_logger.add_scalar('train/epoch_kl_loss', epoch_kl_loss, self.current_epoch)
-            self.tb_logger.add_scalar('train/epoch_contrastive_loss', epoch_contrastive_loss, self.current_epoch)
-            self.tb_logger.add_scalar('train/epoch_acc', epoch_acc, self.current_epoch)
-            self.tb_logger.flush()
+        # SwanLab: 记录epoch级别指标
+        if self.swanlab_logger:
+            self.swanlab_logger.add_scalar('train/epoch_loss', epoch_loss, self.current_epoch)
+            self.swanlab_logger.add_scalar('train/epoch_hard_loss', epoch_hard_loss, self.current_epoch)
+            self.swanlab_logger.add_scalar('train/epoch_kl_loss', epoch_kl_loss, self.current_epoch)
+            self.swanlab_logger.add_scalar('train/epoch_contrastive_loss', epoch_contrastive_loss, self.current_epoch)
+            self.swanlab_logger.add_scalar('train/epoch_acc', epoch_acc, self.current_epoch)
+            self.swanlab_logger.flush()
         
         return {
             'train_loss': epoch_loss,

@@ -92,29 +92,28 @@ class Trainer:
         else:
             self.logger = None
         
-        # 设置TensorBoard日志（只在主进程）
-        self.tb_logger = None
+        # 设置SwanLab日志（只在主进程）
+        self.swanlab_logger = None
         if is_main_process():
-            tb_enabled = getattr(config.system, 'tensorboard_enabled', True)
-            self._log(f"TensorBoard配置: enabled={tb_enabled}, output_dir={config.system.output_dir}")
-            if tb_enabled:
+            sw_enabled = getattr(config.system, 'swanlab_enabled', True)
+            if sw_enabled:
                 try:
-                    from utils.tensorboard_logger import TensorBoardLogger
+                    from utils.swanlab_logger import SwanLabLogger
                     experiment_name = getattr(config.system, 'experiment_name', 'default')
-                    self._log(f"正在初始化TensorBoard, experiment_name={experiment_name}")
-                    self.tb_logger = TensorBoardLogger(
+                    swanlab_project = getattr(config.system, 'swanlab_project', 'MM')
+                    self.swanlab_logger = SwanLabLogger(
                         log_dir=config.system.output_dir,
                         experiment_name=experiment_name,
-                        enabled=True
+                        project=swanlab_project,
+                        enabled=True,
                     )
-                    if self.tb_logger.writer is not None:
-                        self._log(f"TensorBoard日志已启用，日志目录: {self.tb_logger.log_dir}")
+                    if self.swanlab_logger.run is not None:
+                        self._log(f"SwanLab日志已启用，项目: {swanlab_project}, 实验: {experiment_name}")
                     else:
-                        self._log("警告: TensorBoard writer初始化失败")
+                        self._log("警告: SwanLab初始化失败")
                 except Exception as e:
-                    self._log(f"警告: 无法初始化TensorBoard: {e}")
                     import traceback
-                    self._log(traceback.format_exc())
+                    self._log(f"警告: 无法初始化SwanLab: {e}\n{traceback.format_exc()}")
         
         # 训练状态
         self.current_epoch = 0
@@ -423,12 +422,12 @@ class Trainer:
             self.global_step += 1
             self.training_samples_processed += batch_size
 
-            # TensorBoard: 记录batch级别指标
-            if self.tb_logger and self.global_step % self.config.system.log_interval == 0:
-                self.tb_logger.add_scalar('train/batch_loss', loss.item(), self.global_step)
-                self.tb_logger.add_scalar('train/batch_acc', 100.0 * correct / total, self.global_step)
-                self.tb_logger.add_scalar('train/learning_rate', self._get_current_lr(), self.global_step)
-                self.tb_logger.add_scalar('train/grad_norm', float(grad_norm), self.global_step)
+            # SwanLab: 记录batch级别指标
+            if self.swanlab_logger and self.global_step % self.config.system.log_interval == 0:
+                self.swanlab_logger.add_scalar('train/batch_loss', loss.item(), self.global_step)
+                self.swanlab_logger.add_scalar('train/batch_acc', 100.0 * correct / total, self.global_step)
+                self.swanlab_logger.add_scalar('train/learning_rate', self._get_current_lr(), self.global_step)
+                self.swanlab_logger.add_scalar('train/grad_norm', float(grad_norm), self.global_step)
 
             # 日志（只在主进程）
             if is_main_process() and batch_idx % self.config.system.log_interval == 0:
@@ -446,23 +445,23 @@ class Trainer:
         epoch_acc = 100.0 * correct / total
         throughput = total / epoch_time if epoch_time > 0 else 0
 
-        # TensorBoard: 记录epoch级别指标
-        if self.tb_logger:
-            self.tb_logger.add_scalar('train/epoch_loss', epoch_loss, self.current_epoch)
-            self.tb_logger.add_scalar('train/epoch_acc', epoch_acc, self.current_epoch)
-            self.tb_logger.add_scalar('train/epoch_time', epoch_time, self.current_epoch)
-            self.tb_logger.add_scalar('train/throughput', throughput, self.current_epoch)
+        # SwanLab: 记录epoch级别指标
+        if self.swanlab_logger:
+            self.swanlab_logger.add_scalar('train/epoch_loss', epoch_loss, self.current_epoch)
+            self.swanlab_logger.add_scalar('train/epoch_acc', epoch_acc, self.current_epoch)
+            self.swanlab_logger.add_scalar('train/epoch_time', epoch_time, self.current_epoch)
+            self.swanlab_logger.add_scalar('train/throughput', throughput, self.current_epoch)
 
             gpu_memory = self._get_gpu_memory()
             if gpu_memory is not None:
-                self.tb_logger.add_scalar('system/gpu_memory_mb', gpu_memory, self.current_epoch)
+                self.swanlab_logger.add_scalar('system/gpu_memory_mb', gpu_memory, self.current_epoch)
 
             # 记录权重分布（每10个epoch记录一次）
             if self.current_epoch % 10 == 0:
                 model = self.model.module if self.distributed else self.model
-                self.tb_logger.add_weight_distribution(model, self.current_epoch)
+                self.swanlab_logger.add_weight_distribution(model, self.current_epoch)
 
-            self.tb_logger.flush()
+            self.swanlab_logger.flush()
 
         # 分布式训练时汇总指标
         if self.distributed:
@@ -516,7 +515,7 @@ class Trainer:
             all_probs.extend(probs.cpu().numpy())
             
             # 收集特征用于可视化（每20个epoch记录一次）
-            if self.tb_logger and self.current_epoch % 20 == 0:
+            if self.swanlab_logger and self.current_epoch % 20 == 0:
                 try:
                     model = self.model.module if self.distributed else self.model
                     features = model.extract_features(batch)
@@ -534,9 +533,9 @@ class Trainer:
         all_probs = np.array(all_probs)
         
         # TensorBoard: 记录验证指标
-        if self.tb_logger:
-            self.tb_logger.add_scalar('val/loss', val_loss, self.current_epoch)
-            self.tb_logger.add_scalar('val/accuracy', val_acc * 100, self.current_epoch)
+        if self.swanlab_logger:
+            self.swanlab_logger.add_scalar('val/loss', val_loss, self.current_epoch)
+            self.swanlab_logger.add_scalar('val/accuracy', val_acc * 100, self.current_epoch)
             
             # 计算详细指标
             detailed_metrics = calculate_metrics(
@@ -550,7 +549,7 @@ class Trainer:
             
             if detailed_metrics:
                 # 记录整体指标
-                self.tb_logger.add_scalars(
+                self.swanlab_logger.add_scalars(
                     'val/metrics',
                     {
                         'accuracy': detailed_metrics.get('accuracy', 0),
@@ -563,7 +562,7 @@ class Trainer:
                 
                 # 记录混淆矩阵
                 if 'confusion_matrix' in detailed_metrics:
-                    self.tb_logger.add_confusion_matrix(
+                    self.swanlab_logger.add_confusion_matrix(
                         'val/confusion_matrix',
                         detailed_metrics['confusion_matrix'],
                         self.current_epoch,
@@ -572,7 +571,7 @@ class Trainer:
                 
                 # 记录每类指标
                 if 'per_class' in detailed_metrics:
-                    self.tb_logger.add_per_class_metrics(
+                    self.swanlab_logger.add_per_class_metrics(
                         'val',
                         detailed_metrics['per_class'],
                         self.current_epoch
@@ -582,7 +581,7 @@ class Trainer:
                 if 'roc' in detailed_metrics and self.current_epoch % 5 == 0:
                     roc_data = detailed_metrics['roc']
                     # 记录macro-average ROC
-                    self.tb_logger.add_roc_curve(
+                    self.swanlab_logger.add_roc_curve(
                         'val/roc_macro',
                         roc_data['fpr']['micro'],  # 使用micro作为代表
                         roc_data['tpr']['micro'],
@@ -596,7 +595,7 @@ class Trainer:
                     # 记录第一个有样本的类别的PR曲线作为代表
                     for i in range(self.num_classes):
                         if i in pr_data['precision']:
-                            self.tb_logger.add_pr_curve(
+                            self.swanlab_logger.add_pr_curve(
                                 f'val/pr_class_{i}',
                                 pr_data['precision'][i],
                                 pr_data['recall'][i],
@@ -608,7 +607,7 @@ class Trainer:
                 # 记录特征分布（每20个epoch记录一次）
                 if all_features and self.current_epoch % 20 == 0:
                     try:
-                        self.tb_logger.add_feature_distribution(
+                        self.swanlab_logger.add_feature_distribution(
                             'val/feature_distribution',
                             np.array(all_features),
                             all_labels,
@@ -620,7 +619,7 @@ class Trainer:
                     except Exception as e:
                         self._log(f"Warning: 无法记录特征分布: {e}")
             
-            self.tb_logger.flush()
+            self.swanlab_logger.flush()
         
         # 分布式训练时汇总指标
         if self.distributed:
@@ -700,7 +699,7 @@ class Trainer:
             self._log(f'分布式训练: 世界大小={get_world_size()}, 当前排名={get_rank()}')
         
         # TensorBoard: 记录超参数
-        if self.tb_logger:
+        if self.swanlab_logger:
             hparams = {
                 'batch_size': self.config.data.batch_size,
                 'learning_rate': self.config.train.learning_rate,
@@ -770,13 +769,13 @@ class Trainer:
             if self.distributed:
                 barrier()
         
-        # TensorBoard: 记录最终超参数和指标
-        if self.tb_logger and hasattr(self, '_hparams'):
+        # SwanLab: 记录最终超参数和指标
+        if self.swanlab_logger and hasattr(self, '_hparams'):
             final_metrics = {
                 'hparam/best_val_acc': self.best_val_acc,
                 'hparam/final_epoch': self.current_epoch
             }
-            self.tb_logger.add_hyperparameters(self._hparams, final_metrics)
-            self.tb_logger.close()
+            self.swanlab_logger.add_hyperparameters(self._hparams, final_metrics)
+            self.swanlab_logger.close()
         
         self._log('训练完成!')

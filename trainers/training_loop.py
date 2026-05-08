@@ -46,7 +46,7 @@ class TrainingLoop:
         fp16: bool = False,
         lr_scheduler=None,
         logger=None,
-        tb_logger=None,
+        swanlab_logger=None,
         class_names: Optional[List[str]] = None,
         num_classes: int = 10
     ):
@@ -59,7 +59,7 @@ class TrainingLoop:
         self.fp16 = fp16
         self.lr_scheduler = lr_scheduler
         self.logger = logger
-        self.tb_logger = tb_logger
+        self.swanlab_logger = swanlab_logger
         self.class_names = class_names
         self.num_classes = num_classes
         
@@ -116,11 +116,11 @@ class TrainingLoop:
             self.global_step += 1
             self.training_samples_processed += batch_size
             
-            # TensorBoard记录
-            if self.tb_logger and self.global_step % 10 == 0:
-                self.tb_logger.add_scalar('train/batch_loss', loss.item(), self.global_step)
-                self.tb_logger.add_scalar('train/batch_acc', 100. * correct / total, self.global_step)
-                self.tb_logger.add_scalar('train/learning_rate', self._get_current_lr(), self.global_step)
+            # SwanLab记录
+            if self.swanlab_logger and self.global_step % 10 == 0:
+                self.swanlab_logger.add_scalar('train/batch_loss', loss.item(), self.global_step)
+                self.swanlab_logger.add_scalar('train/batch_acc', 100. * correct / total, self.global_step)
+                self.swanlab_logger.add_scalar('train/learning_rate', self._get_current_lr(), self.global_step)
             
             # 日志
             if _is_main_process() and self.logger and batch_idx % 10 == 0:
@@ -137,13 +137,13 @@ class TrainingLoop:
         epoch_acc = 100. * correct / total
         throughput = total / epoch_time if epoch_time > 0 else 0
         
-        # TensorBoard记录epoch指标
-        if self.tb_logger and _is_main_process():
-            self.tb_logger.add_scalar('train/epoch_loss', epoch_loss, self.current_epoch)
-            self.tb_logger.add_scalar('train/epoch_acc', epoch_acc, self.current_epoch)
-            self.tb_logger.add_scalar('train/epoch_time', epoch_time, self.current_epoch)
-            self.tb_logger.add_scalar('train/throughput', throughput, self.current_epoch)
-            self.tb_logger.flush()
+        # SwanLab记录epoch指标
+        if self.swanlab_logger and _is_main_process():
+            self.swanlab_logger.add_scalar('train/epoch_loss', epoch_loss, self.current_epoch)
+            self.swanlab_logger.add_scalar('train/epoch_acc', epoch_acc, self.current_epoch)
+            self.swanlab_logger.add_scalar('train/epoch_time', epoch_time, self.current_epoch)
+            self.swanlab_logger.add_scalar('train/throughput', throughput, self.current_epoch)
+            self.swanlab_logger.flush()
         
         # 分布式汇总
         if self.distributed:

@@ -1,5 +1,5 @@
 data:
-  batch_size: 16
+  batch_size: 32
   num_workers: 4
   pin_memory: true
 
@@ -29,27 +29,28 @@ classes:
 model:
   backbones:
     audio:
-      type: sslam
+      type: ast_hf
       feature_dim: 768
       pretrained: true
-      freeze: false
+      freeze: true
       extra_params:
-        target_length: 1024
+        model_name: "MIT/ast-finetuned-audioset-10-10-0.4593"
+        max_length: 1024
 
   fusion_type: concat
   fusion_hidden_dim: 512
   mid_fusion_enabled: false
 
   dropout_rate: 0.3
-  classifier_hidden_dims: [256]
+  classifier_hidden_dims: [512, 256]
 
 train:
   epochs: 30
-  learning_rate: 0.00005
-  weight_decay: 0.01
+  learning_rate: 0.001
+  weight_decay: 0.0001
 
   lr_scheduler: cosine
-  warmup_epochs: 3
+  warmup_epochs: 2
   step_size: 30
   gamma: 0.1
 
@@ -83,11 +84,11 @@ system:
   log_interval: 10
   save_interval: 10
 
-  output_dir: "output/solo_audio_sslam"
+  output_dir: "output/solo_audio_ast_frozen_head"
   resume: ""
 
   dist_backend: "nccl"
   dist_url: "env://"
 
   tensorboard_enabled: false
-  experiment_name: "solo_audio_sslam"
+  experiment_name: "solo_audio_ast_frozen"
