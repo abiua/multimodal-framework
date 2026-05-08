@@ -16,6 +16,7 @@ from . import audio_temporal
 from . import audio_ast
 from . import audio_sslam
 from . import audio_beats
+from . import audio_cnn6
 try:
     from . import unireplknet_models
 except ImportError:
